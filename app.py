@@ -5,38 +5,56 @@ st.set_page_config(page_title="AMV-AI", page_icon="🔬", layout="centered")
 
 st.markdown("""
 <style>
-    .stApp { background-color: #ffffff; }
-    .stApp, .stMarkdown, p, label { color: #1a1a2e !important; }
-    h1 { color: #0077b6 !important; font-size: 2.2rem !important; }
-    h2, h3 { color: #0096c7 !important; }
+    .stApp { background-color: #F6FAFD; }
+    .stApp, .stMarkdown, p, label { color: #1A3D63 !important; }
+    h1, h2, h3 { color: #0A1931 !important; }
+    h1 { font-size: 2.2rem !important; }
     .stButton > button {
-        background-color: #0077b6 !important;
-        color: white !important;
+        background-color: #B3CFE5 !important;
+        color: #1A3D63 !important;
         border: none !important;
         border-radius: 8px !important;
         padding: 0.5rem 2rem !important;
         font-size: 1rem !important;
+        transition: background-color 0.3s ease, color 0.3s ease;
     }
-    .stButton > button:hover { background-color: #0096c7 !important; }
-    .stRadio > label { color: #1a1a2e !important; font-weight: 500 !important; }
-    hr { border-color: #90e0ef !important; }
-    .stProgress > div > div { background-color: #0077b6 !important; }
-    [data-testid="stMetricValue"] { color: #0077b6 !important; font-weight: 700 !important; }
-    [data-testid="stMetricLabel"] { color: #1a1a2e !important; }
-    .stage-card {
-        background-color: #f0f9ff;
-        border-left: 4px solid #0077b6;
+    .stButton > button p {
+        color: #1A3D63 !important;
+        transition: color 0.3s ease;
+    }
+    .stButton > button:hover { 
+        background-color: #4A7FA7 !important; 
+    }
+    .stButton > button:hover p {
+        color: white !important;
+    }
+    .stRadio > label { color: #1A3D63 !important; font-weight: 500 !important; }
+    hr { border-color: #B3CFE5 !important; }
+    .stProgress > div > div { background-color: #1A3D63 !important; }
+    [data-testid="stMetricValue"] { color: #0A1931 !important; font-weight: 700 !important; }
+    [data-testid="stMetricLabel"] { color: #1A3D63 !important; }
+    
+    .stage-card, .prop-card, .method-card {
+        background-color: transparent;
         border-radius: 8px;
+    }
+    .stage-card {
+        border: 1px solid #B3CFE5;
+        border-left: 4px solid #1A3D63;
         padding: 1.2rem 1.5rem;
         margin: 1rem 0;
     }
     .prop-card {
-        background-color: #f0f9ff;
-        border-radius: 8px;
         padding: 1rem 1.5rem;
         margin: 0.5rem 0;
-        border: 1px solid #90e0ef;
-        color: #1a1a2e !important;
+        border: 1px solid #B3CFE5;
+    }
+    .method-card {
+        padding: 0.8rem 1rem;
+        margin: -0.5rem 0 0.5rem 0;
+    }
+    .method-card small {
+        color: #1A3D63;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -85,48 +103,481 @@ def fetch_compound(name):
     except:
         return None
 
-def interpret_logp(logp):
-    try:
-        v = float(logp)
-        if v < 0:
-            return "Very polar — consider HILIC column"
-        elif v < 1:
-            return "Polar — C8 or mixed-mode column"
-        elif v < 4:
-            return "Moderate — C18 reverse phase (ideal range)"
-        elif v < 5:
-            return "Lipophilic — C18 with high organic start"
-        else:
-            return "Very lipophilic — C18 or C4, high organic"
-    except:
-        return "N/A"
+import re
 
-def interpret_uv(smiles):
+from rules import CHROMOPHORE_RULES, COLUMN_RULES, SAMPLE_PREP_RULES, VALIDATION_SST_RULES
+
+def interpret_uv(smiles, formula="", extra_hints=None):
+    """
+    Analyzes chemical properties to identify chromophores using the knowledge base.
+    Returns:
+        html_output (str): Formatted HTML bullet points for the UI.
+        features (dict): Normalized boolean flags for downstream logic.
+    """
     smiles = smiles or ""
-    st.write("DEBUG SMILES:", smiles)
+    formula = formula or ""
+    hints = (extra_hints or "").lower()
 
-    # Aromatic ring — lowercase letters in SMILES
-    has_aromatic = any(c in smiles for c in ["c", "n", "o", "s"] if c.islower())
+    # 1. Normalize features
+    features = {
+        "aromatic_ring": False,
+        "heteroaromatic_ring": False,
+        "carbonyl": False,
+        "disulfide": False,
+        "nitro": False,
+        "azo": False,
+        "nucleic_acid": False,
+        "peptide_or_protein": False,
+        "conjugated_alkene": False,
+        "alkene": False,
+        "alkyne": False,
+    }
+
+    # Heteroaromatic: n, o, s in lowercase inside rings, or keywords
+    if any(c in smiles for c in ["n", "o", "s"] if c.islower()) or \
+       any(kw in hints for kw in ["pyridine", "indole", "heteroaromatic", "imidazole", "thiazole"]):
+        features["heteroaromatic_ring"] = True
+        
+    # Aromatic: c in lowercase inside rings, or keywords (if heteroaromatic is true, we might still set aromatic to true, but distinguish)
+    if ("c" in smiles) or any(kw in hints for kw in ["benzene", "phenyl", "aromatic"]):
+        features["aromatic_ring"] = True
 
     # Carbonyl
-    has_carbonyl = "C=O" in smiles or "C(=O)" in smiles
+    if "C=O" in smiles or "C(=O)" in smiles or "=O" in smiles or "carbonyl" in hints:
+        features["carbonyl"] = True
 
-    # Sulfur-sulfur bond — CSSSC, CSSC etc
-    has_sulfur_bond = "SS" in smiles
+    # Disulfide / Sulfur
+    if "SS" in smiles or "SS" in formula or re.search(r'S[2-9]', formula) or \
+       any(kw in hints for kw in ["ss bond", "s-s bond", "disulfide", "sulfide"]):
+        features["disulfide"] = True
 
     # Nitro
-    has_nitro = "N(=O)" in smiles or "[N+](=O)" in smiles
+    if "N(=O)" in smiles or "[N+](=O)" in smiles or "NO2" in formula or "nitro" in hints:
+        features["nitro"] = True
 
-    if has_aromatic:
-        return "Aromatic ring detected — start at 254 nm. Also try 220 nm for higher sensitivity."
-    elif has_nitro:
-        return "Nitro group detected — absorbs at 254 nm and 330 nm. Try both."
-    elif has_carbonyl:
-        return "Carbonyl group detected — try 210–215 nm. Expect some background noise."
-    elif has_sulfur_bond:
-        return "Sulfur-sulfur bond detected (disulfide/trisulfide) — absorbs at 210–220 nm. Your compound should be detectable around 215 nm."
+    # Azo
+    if "N=N" in smiles or "azo" in hints:
+        features["azo"] = True
+        
+    # Conjugated Alkene (heuristic: multiple double bonds close to each other, or hint)
+    if "=C-C=" in smiles or "C=C-C=C" in smiles or "conjugat" in hints:
+        features["conjugated_alkene"] = True
+    elif "=" in smiles and not features["carbonyl"]:
+        features["alkene"] = True
+        
+    # Alkyne
+    if "#" in smiles or "alkyne" in hints:
+        features["alkyne"] = True
+
+    # Nucleic Acid
+    if any(kw in hints for kw in ["dna", "rna", "nucleic", "oligonucleotide"]):
+        features["nucleic_acid"] = True
+
+    # Peptide / Protein
+    if any(kw in hints for kw in ["peptide", "protein", "mab", "antibody"]):
+        features["peptide_or_protein"] = True
+
+    # 2. Map features to recommendations using CHROMOPHORE_RULES
+    results = []
+    has_strong = features["aromatic_ring"] or features["heteroaromatic_ring"] or features["conjugated_alkene"]
+
+    # Evaluate rules
+    if features["heteroaromatic_ring"]:
+        rule = CHROMOPHORE_RULES["heteroaromatic_ring"]
+        results.append(f"• <b>{rule['description']}</b> → {rule['recommendation']}")
+    elif features["aromatic_ring"]: # Else-if to avoid redundant aromatic warnings if heteroaromatic is present
+        rule = CHROMOPHORE_RULES["aromatic_ring"]
+        results.append(f"• <b>{rule['description']}</b> → {rule['recommendation']}")
+
+    if features["conjugated_alkene"]:
+        rule = CHROMOPHORE_RULES["conjugated_alkene"]
+        results.append(f"• <b>{rule['description']}</b> → {rule['recommendation']}")
+
+    if features["carbonyl"]:
+        rule = CHROMOPHORE_RULES["carbonyl"]
+        results.append(f"• <b>{rule['description']}</b> → {rule['recommendation']}")
+
+    if features["disulfide"]:
+        rule = CHROMOPHORE_RULES["disulfide"]
+        results.append(f"• <b>{rule['description']}</b> → {rule['recommendation']}")
+
+    if features["nitro"]:
+        rule = CHROMOPHORE_RULES["nitro"]
+        if has_strong:
+            results.append(f"• <b>{rule['description']}</b> → Useful bands at 254 nm and 330 nm. Monitor 330 nm if low UV background is poor.")
+        else:
+            results.append(f"• <b>{rule['description']}</b> → Strong at 254 nm. Recommend monitoring this channel.")
+
+    if features["azo"]:
+        rule = CHROMOPHORE_RULES["azo"]
+        results.append(f"• <b>{rule['description']}</b> → {rule['recommendation']}")
+        
+    if features["nucleic_acid"]:
+        rule = CHROMOPHORE_RULES["nucleic_acid"]
+        results.append(f"• <b>{rule['description']}</b> → {rule['recommendation']}")
+        
+    if features["peptide_or_protein"]:
+        rule = CHROMOPHORE_RULES["peptide_or_protein"]
+        results.append(f"• <b>{rule['description']}</b> → {rule['recommendation']}")
+
+    if not results:
+        # Check deep UV options
+        if features["alkene"]:
+            rule = CHROMOPHORE_RULES["alkene"]
+            results.append(f"• <b>{rule['description']}</b> → {rule['recommendation']}")
+        elif features["alkyne"]:
+            rule = CHROMOPHORE_RULES["alkyne"]
+            results.append(f"• <b>{rule['description']}</b> → {rule['recommendation']}")
+        else:
+            results.append("• ⚠️ <b>No strong chromophore</b> → UV response is predicted to be weak; consider PDA scanning to confirm signal and be prepared to use MS, ELSD/CAD, or derivatization if sensitivity is inadequate.")
+
+    html_output = "<br>".join(results)
+    
+    if any(str(wl) in html_output for wl in [190, 195, 200, 205, 210, 214, 215, 220]):
+        html_output += "<br><br>⚠️ <i>Note: Recommended λ values are approximate detection windows. At deep-UV (< 220 nm), organic solvents and buffers may have significant absorbance and cause baseline noise/drift. Acetonitrile has a lower UV cut-off than methanol and is usually preferred.</i>"
+
+    return html_output, features
+
+def assess_additional_properties(smiles, formula, hints, logp, tpsa):
+    """
+    Evaluates ionization, solubility expectations, and chemical stability based on SMILES and hints.
+    """
+    smiles = smiles or ""
+    formula = formula or ""
+    hints = (hints or "").lower()
+    
+    try: logp_val = float(logp)
+    except: logp_val = None
+    try: tpsa_val = float(tpsa)
+    except: tpsa_val = None
+
+    flags = {
+        "acidic": False,
+        "basic": False,
+        "amphoteric": False,
+        "hydrolysis_risk": [],
+        "oxidation_risk": []
+    }
+
+    # 1. Ionization & pKa awareness
+    if any(m in smiles for m in ["C(=O)O", "S(=O)(=O)O", "P(=O)(O)O"]) or \
+       any(kw in hints for kw in ["carboxylic acid", "benzoic acid", "acetic acid", "sulfonic acid", "phosphate", "phosphonate", "phenol", "tyrosine"]):
+        flags["acidic"] = True
+        
+    # 'N' not adjacent to C=O (very basic heuristic), or explicit keywords
+    if ("N" in smiles and "C(=O)N" not in smiles) or \
+       any(kw in hints for kw in ["amine", "guanidinium", "biguanide", "piperidine", "piperazine", "pyrrolidine", "pyridine", "imidazole"]):
+        flags["basic"] = True
+        
+    if any(kw in hints for kw in ["amino acid", "peptide", "betaine"]):
+        flags["acidic"] = True
+        flags["basic"] = True
+
+    if flags["acidic"] and flags["basic"]:
+        flags["amphoteric"] = True
+        flags["ionization_warning"] = "Retention and peak shape will be highly pH-dependent due to amphoteric/zwitterionic ionizable groups. Predicted column choice and logP-based retention are less reliable without knowing actual pKa values. Experimental pKa scouting is required before finalizing mobile-phase pH."
+    elif flags["acidic"]:
+        flags["ionization_warning"] = "Retention and peak shape will be highly pH-dependent due to acidic ionizable groups. Predicted column choice and logP-based retention are less reliable without knowing actual pKa values. Experimental pKa scouting is required before finalizing mobile-phase pH."
+    elif flags["basic"]:
+        flags["ionization_warning"] = "Retention and peak shape will be highly pH-dependent due to basic ionizable groups. Predicted column choice and logP-based retention are less reliable without knowing actual pKa values. Experimental pKa scouting is required before finalizing mobile-phase pH."
     else:
-        return "⚠️ No common UV chromophore detected — UV detection may not work reliably. Consider MS, ELSD, or CAD."
+        flags["ionization_warning"] = None
+
+    # 2. Chemical Stability Flags
+    if "C(=O)O" in smiles and "C(=O)OH" not in smiles:
+        flags["hydrolysis_risk"].append("ester")
+    if any(kw in hints for kw in ["ester", "lactam", "acetal", "ketal", "imine", "schiff"]):
+        flags["hydrolysis_risk"].append("hydrolyzable group")
+        
+    if "C=O" in smiles and "C(=O)H" in smiles:
+        flags["oxidation_risk"].append("aldehyde")
+    if "c1ccc(O)cc1" in smiles or "phenol" in hints:
+        flags["oxidation_risk"].append("phenol")
+    if "S" in smiles or any(kw in hints for kw in ["thiol", "disulfide", "sulfide"]):
+        flags["oxidation_risk"].append("thiol/sulfur")
+        
+    stability_warnings = []
+    if flags["hydrolysis_risk"]:
+        stability_warnings.append(f"Contains {', '.join(set(flags['hydrolysis_risk']))} functionality; verify solution stability over the planned pH range and autosampler time (hydrolysis can bias assay results).")
+    if flags["oxidation_risk"]:
+        stability_warnings.append(f"Contains {', '.join(set(flags['oxidation_risk']))} functionality; possible oxidation. Recommend minimizing oxygen/light exposure or adding antioxidants where appropriate.")
+
+    flags["stability_warnings"] = stability_warnings
+
+    # 3. Solubility & Diluent Compatibility
+    if logp_val is not None:
+        if logp_val < 0 and tpsa_val and tpsa_val > 60:
+            flags["solubility_statement"] = "Analyte is very polar (logP < 0, high TPSA). Likely good water/buffer solubility; may have limited solubility in high organic solvents."
+        elif logp_val > 4:
+            flags["solubility_statement"] = "Analyte is very hydrophobic (logP > 4). Likely limited water solubility, better in organic solvents (ACN/MeOH)."
+        else:
+            flags["solubility_statement"] = "Analyte has moderate lipophilicity. Confirm solubility experimentally in both aqueous buffers and organics."
+    else:
+        flags["solubility_statement"] = "Solubility expectations cannot be inferred without logP/TPSA."
+
+    flags["solubility_warning"] = (
+        "Ensure the analyte is fully soluble in the chosen diluent and in the starting mobile phase; "
+        "precipitation or phase separation will invalidate the method. "
+        "For RP-HPLC, the injection solvent should not be significantly stronger than the starting mobile phase "
+        "(e.g., injecting in 100% ACN onto a 5% organic starting condition can cause fronting/distorted peaks). "
+        "Encourage matching or slightly weaker organic content in the diluent."
+    )
+
+    return flags
+
+def recommend_column(logp, tpsa, mw, features, method_type, matrix):
+    """
+    Recommends a column chemistry based on physicochemical properties, method type, and normalized features.
+    """
+    # Safely cast inputs
+    try: logp_val = float(logp)
+    except: logp_val = None
+    try: mw_val = float(mw)
+    except: mw_val = None
+    try: tpsa_val = float(tpsa)
+    except: tpsa_val = None
+
+    matrix = (matrix or "").lower()
+    method_type = (method_type or "").lower()
+    is_peptide = features.get("peptide_or_protein", False)
+    has_aromatic = features.get("aromatic_ring", False) or features.get("heteroaromatic_ring", False)
+
+    rule = None
+
+    # 1. Peptides and large molecules
+    if is_peptide or (mw_val and mw_val > 1500):
+        rule = COLUMN_RULES["peptide_large"]
+
+    # 2. Very polar analytes (HILIC) and check for k' < 1
+    elif logp_val is not None and logp_val < 0:
+        if tpsa_val and tpsa_val > 80:
+            rule = COLUMN_RULES["very_polar"]
+        else:
+            rule = COLUMN_RULES["polar"]
+
+    # 3. Very hydrophobic analytes
+    elif logp_val is not None and logp_val > 4.0:
+        rule = COLUMN_RULES["very_hydrophobic"]
+
+    # 4. Secondary Check: Aromatic + Hydrophobic / Polar Aromatic
+    elif logp_val is not None and has_aromatic:
+        if logp_val > 3.5 and mw_val and mw_val > 400:
+            rule = COLUMN_RULES["aromatic_bulky"]
+        elif tpsa_val and tpsa_val > 60:
+            rule = COLUMN_RULES["aromatic_polar"]
+
+    # 5. Lipid-rich / Bioanalytical matrices
+    if not rule and any(m in matrix for m in ["plasma", "serum", "oil", "lipid"]):
+        rule = COLUMN_RULES["lipid_matrix"]
+        
+    # 6. Method Type Overrides
+    if not rule and ("stability" in method_type or "impurity" in method_type):
+        rule = COLUMN_RULES["stability_indicating"]
+
+    # Default fallback
+    if not rule:
+        rule = COLUMN_RULES["default"]
+        
+    rec, expl = rule["recommendation"], rule["explanation"]
+
+    return rec, expl + "<br><br><i>Note: This selection is a structure-based starting point; final column choice must be confirmed experimentally (retention, peak shape, resolution, robustness).</i>"
+
+def recommend_sample_prep(matrix, features, method_type):
+    """
+    Recommends sample preparation steps based on knowledge base rules.
+    """
+    matrix = (matrix or "").lower()
+    method_type = (method_type or "").lower()
+    
+    if any(m in matrix for m in ["plasma", "serum", "blood", "csf", "tissue"]):
+        prep_info = dict(SAMPLE_PREP_RULES["plasma_serum_blood"])
+        # Method-type adjustment
+        if "bioanalytical" in method_type:
+            prep_info["warnings"].append("For bioanalysis, strict matrix effect evaluation (IS normalization) is required.")
+        if features.get("peptide_or_protein"):
+            prep_info["warnings"].append("For peptides/proteins, avoid harsh PPT. Consider ultrafiltration or milder SPE.")
+        return prep_info
+        
+    if "urine" in matrix:
+        return dict(SAMPLE_PREP_RULES["urine"])
+        
+    if "cell culture" in matrix or "media" in matrix:
+        return dict(SAMPLE_PREP_RULES["cell_culture"])
+
+    if any(m in matrix for m in ["tablet", "capsule", "solid"]):
+        prep_info = dict(SAMPLE_PREP_RULES["tablet_capsule"])
+        if "impurity" in method_type:
+            prep_info["warnings"].append("For impurity profiling, avoid aggressive extraction that might degrade the API artificially.")
+        return prep_info
+
+    if any(m in matrix for m in ["water", "environmental"]):
+        return dict(SAMPLE_PREP_RULES["water_env"])
+
+    if any(m in matrix for m in ["oil", "fat", "food", "lipid"]):
+        return dict(SAMPLE_PREP_RULES["oil_lipid"])
+
+    return dict(SAMPLE_PREP_RULES["default"])
+
+def recommend_validation_checks(method_type):
+    """
+    Returns relevant validation and SST checks based on method type.
+    """
+    method_type = (method_type or "").lower()
+    checks = [VALIDATION_SST_RULES["usp_621"]]
+    
+    if "stability" in method_type or "impurity" in method_type:
+        checks.append(VALIDATION_SST_RULES["stability_indicating"])
+    
+    if "bioanalytical" in method_type:
+        checks.append(VALIDATION_SST_RULES["bioanalytical"])
+        
+    checks.append(VALIDATION_SST_RULES["robustness"])
+    return checks
+
+def collect_warnings(matrix, method_type, features, column_type, logp, uv_html, chem_flags):
+    """
+    Aggregates warnings across all domains.
+    """
+    warnings = []
+    
+    # Sample Prep / Matrix Warnings
+    matrix = (matrix or "").lower()
+    if any(m in matrix for m in ["plasma", "serum", "tissue"]) and "Do not inject un-centrifuged" not in str(warnings):
+        warnings.append("Do not inject un-centrifuged biological samples.")
+        
+    # Column/Polarity Warnings
+    try: logp_val = float(logp)
+    except: logp_val = None
+    
+    if logp_val is not None and logp_val < 0 and "C18" in column_type:
+        warnings.append("Polar analyte on standard C18 – risk of k' < 1 and co-elution with void volume.")
+        
+    if any(m in matrix for m in ["oil", "lipid", "fat"]) and "C18" in column_type:
+        warnings.append("Lipid matrix on C18 column – very high risk of irreversible fouling.")
+        
+    # LC-MS
+    if "ms" in method_type.lower() or "bioanalytical" in method_type.lower() or "weak" in uv_html.lower():
+        warnings.append("If using LC-MS detection: non-volatile buffers (phosphate, sulfate) are unsuitable; use volatile buffers (e.g. ammonium formate/acetate).")
+        
+    # Chemistry flags
+    if chem_flags and chem_flags.get("ionization_warning"):
+        warnings.append("⚛️ " + chem_flags["ionization_warning"])
+    if chem_flags and chem_flags.get("stability_warnings"):
+        for w in chem_flags["stability_warnings"]:
+            warnings.append("🧪 " + w)
+        
+    return warnings
+
+METHOD_OPTIONS = [
+    {
+        "label": "Potency / Assay",
+        "description": "Measure the amount of API in a product",
+        "impact": "Focuses on accuracy and linearity. Calibration range and standard curve guidance provided.",
+        "key": "Potency Assay",
+        "icon": "⚗️"
+    },
+    {
+        "label": "Stability-Indicating",
+        "description": "Separate and quantify API + all degradants",
+        "impact": "Specificity is #1. Forced degradation study required. Column selectivity critical.",
+        "key": "Stability-Indicating Assay",
+        "icon": "🔬"
+    },
+    {
+        "label": "Impurity Profiling",
+        "description": "Detect and measure related substances",
+        "impact": "High sensitivity required. LOQ guidance and low-UV detection will be flagged.",
+        "key": "Impurity/Related Substances",
+        "icon": "🔍"
+    },
+    {
+        "label": "Dissolution",
+        "description": "How fast the drug releases from the dosage form",
+        "impact": "Dissolution medium IS the sample matrix. No protein precipitation needed.",
+        "key": "Dissolution",
+        "icon": "💊"
+    },
+    {
+        "label": "Identification Test",
+        "description": "Confirm presence — not measuring how much",
+        "impact": "Retention time and UV spectrum match only. No quantitation needed.",
+        "key": "Identification Test",
+        "icon": "✅"
+    },
+    {
+        "label": "Bioanalytical",
+        "description": "Measure drug in plasma, urine, or tissue",
+        "impact": "Matrix extraction is mandatory. LC-MS compatibility flagged. Internal standard required.",
+        "key": "Bioanalytical",
+        "icon": "🧬"
+    },
+    {
+        "label": "Content Uniformity",
+        "description": "Dose-to-dose consistency across tablets",
+        "impact": "Individual tablet prep guidance (n=10). Precision is the primary concern.",
+        "key": "Content Uniformity",
+        "icon": "📊"
+    }
+]
+
+METHOD_CONTEXT = {
+    "Potency Assay": {
+        "priority": "Accuracy & Linearity",
+        "sensitivity_note": "Typical working range: 50–150% of nominal concentration.",
+        "key_warning": "Ensure the reference standard is accurately weighed and the calibration range brackets all expected sample concentrations.",
+        "lc_ms_needed": False,
+        "extraction_required": False,
+        "forced_degradation_required": False,
+    },
+    "Stability-Indicating Assay": {
+        "priority": "Specificity — separation from all degradants",
+        "sensitivity_note": "Must resolve API from all forced degradation products (acid, base, oxidative, thermal, photolytic).",
+        "key_warning": "Forced degradation study required before method scouting. Column selectivity is the #1 parameter to optimize.",
+        "lc_ms_needed": False,
+        "extraction_required": False,
+        "forced_degradation_required": True,
+    },
+    "Impurity/Related Substances": {
+        "priority": "Sensitivity — LOQ typically 0.05–0.1% of API",
+        "sensitivity_note": "Detection limits must cover ICH Q3A/Q3B thresholds. Low UV or MS may be needed for weak chromophores.",
+        "key_warning": "If analyte has weak UV, impurity profiling at trace levels may require LC-MS, ELSD/CAD, or derivatization.",
+        "lc_ms_needed": False,
+        "extraction_required": False,
+        "forced_degradation_required": False,
+    },
+    "Dissolution": {
+        "priority": "Sample simplicity — dissolution medium IS the matrix",
+        "sensitivity_note": "Medium pH directly affects mobile phase design. No protein precipitation needed.",
+        "key_warning": "Confirm analyte is UV-active at expected dissolution concentrations. Filter (0.45 μm) the medium directly; no other prep usually required.",
+        "lc_ms_needed": False,
+        "extraction_required": False,
+        "forced_degradation_required": False,
+    },
+    "Identification Test": {
+        "priority": "Retention time match + UV spectral confirmation",
+        "sensitivity_note": "No calibration curve needed. Method confirms presence/absence only.",
+        "key_warning": "PDA is strongly recommended so UV spectrum can be compared to a reference standard in the same run.",
+        "lc_ms_needed": False,
+        "extraction_required": False,
+        "forced_degradation_required": False,
+    },
+    "Bioanalytical": {
+        "priority": "Sensitivity + selectivity in biological matrix",
+        "sensitivity_note": "Typically pg/mL to ng/mL range; LC-MS/MS is often the required detector.",
+        "key_warning": "Matrix extraction (PPT/SPE/LLE) is mandatory. An internal standard is required for quantitation. Validate per FDA/EMA bioanalytical guidance.",
+        "lc_ms_needed": True,
+        "extraction_required": True,
+        "forced_degradation_required": False,
+    },
+    "Content Uniformity": {
+        "priority": "Precision across individual dosage units",
+        "sensitivity_note": "USP <905> or Ph.Eur. 2.9.40 applies. Typically n=10 individual tablets.",
+        "key_warning": "Prepare each tablet individually (no pooling). Extraction efficiency must be >98% and consistent unit-to-unit.",
+        "lc_ms_needed": False,
+        "extraction_required": False,
+        "forced_degradation_required": False,
+    }
+}
 
 # STAGE 0
 if st.session_state.stage == 0:
@@ -154,45 +605,31 @@ if st.session_state.stage == 0:
             go_next()
             st.rerun()
 
+
+
 # STAGE 1
 elif st.session_state.stage == 1:
     st.subheader("Stage 1 — Method Type")
     st.write("What are you trying to do with this method?")
 
-    method_type = st.radio(
-        "Select the purpose of your method:",
-        [
-            "Measure the amount of active drug (API) in a product",
-            "Separate and measure the drug AND all its impurities/degradants",
-            "Measure impurities only (not the API content)",
-            "Test how fast the drug releases from the dosage form",
-            "Confirm the drug is present — not measuring how much",
-            "Measure the drug in a biological sample (plasma, urine, tissue)",
-            "Check dose-to-dose consistency across tablets or capsules"
-        ],
-        key="q1"
-    )
-
-    method_map = {
-        "Measure the amount of active drug (API) in a product": "Potency Assay",
-        "Separate and measure the drug AND all its impurities/degradants": "Stability-Indicating Assay",
-        "Measure impurities only (not the API content)": "Impurity/Related Substances",
-        "Test how fast the drug releases from the dosage form": "Dissolution",
-        "Confirm the drug is present — not measuring how much": "Identification Test",
-        "Measure the drug in a biological sample (plasma, urine, tissue)": "Bioanalytical",
-        "Check dose-to-dose consistency across tablets or capsules": "Content Uniformity"
-    }
-
-    col1, col2 = st.columns([1, 4])
-    with col1:
-        if st.button("← Back"):
-            go_back()
-            st.rerun()
-    with col2:
-        if st.button("Continue →"):
-            st.session_state.method_type = method_map[method_type]
+    for opt in METHOD_OPTIONS:
+        is_selected = st.session_state.get("method_type") == opt["key"]
+        border = "2px solid #0A1931" if is_selected else "1px solid #B3CFE5"
+        if st.button(f"{opt['icon']} **{opt['label']}**", key=f"btn_{opt['key']}"):
+            st.session_state.method_type = opt["key"]
             go_next()
             st.rerun()
+        st.markdown(f"""
+        <div class="method-card" style="border:{border};">
+            <small>{opt['description']}</small><br>
+            <small>→ {opt['impact']}</small>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.divider()
+    if st.button("← Back"):
+        go_back()
+        st.rerun()
 
 # STAGE 2
 elif st.session_state.stage == 2:
@@ -202,6 +639,11 @@ elif st.session_state.stage == 2:
     compound_name = st.text_input(
         "Compound name:",
         placeholder="e.g. ibuprofen, dimethyl trisulfide, metformin"
+    )
+
+    extra_hints = st.text_input(
+        "Compound class or hints (optional):",
+        placeholder="e.g. peptide, DNA, impurity, high-fat matrix..."
     )
 
     if st.button("🔍 Fetch Properties"):
@@ -221,6 +663,24 @@ elif st.session_state.stage == 2:
         smiles = p.get("smiles", "")
 
         st.success(f"✅ Found: {p['iupac']}")
+        
+        ctx = METHOD_CONTEXT.get(st.session_state.method_type, {})
+        if ctx:
+            st.markdown(f"""
+            <div class="stage-card">
+                <b>🎯 Method Priority:</b> {ctx['priority']}<br><br>
+                <b>📏 Sensitivity context:</b> {ctx['sensitivity_note']}<br><br>
+                <b>⚠️ Key requirement:</b> {ctx['key_warning']}
+            </div>
+            """, unsafe_allow_html=True)
+
+            if ctx.get("lc_ms_needed"):
+                st.warning("🔬 Bioanalytical methods typically require LC-MS/MS. Ensure mobile phase uses volatile buffers only (ammonium formate/acetate).")
+            if ctx.get("extraction_required"):
+                st.warning("🧪 Biological matrix detected: protein precipitation, centrifugation, and filtration are mandatory before column injection.")
+            if ctx.get("forced_degradation_required"):
+                st.warning("⚗️ Stability-indicating method: forced degradation study must precede method scouting to identify potential degradants.")
+                
         st.markdown("### Molecular Properties")
 
         col1, col2, col3 = st.columns(3)
@@ -239,12 +699,37 @@ elif st.session_state.stage == 2:
 
         st.markdown("### What this means for your method")
 
-        uv_result = interpret_uv(smiles)
+        uv_result, features = interpret_uv(smiles, p.get('formula', ''), extra_hints)
+        chem_flags = assess_additional_properties(smiles, p.get('formula', ''), extra_hints, p.get('logp'), p.get('tpsa'))
+        
+        st.session_state.features = features  # Save for downstream stages
+        
+        col_headline, col_explanation = recommend_column(
+            logp=p.get('logp'),
+            tpsa=p.get('tpsa'),
+            mw=p.get('mw'),
+            features=features,
+            method_type=st.session_state.method_type,
+            matrix=extra_hints # Proxy for matrix until stage 3
+        )
+
+        warnings = collect_warnings(
+            matrix=extra_hints,
+            method_type=st.session_state.method_type,
+            features=features,
+            column_type=col_headline,
+            logp=p.get('logp'),
+            uv_html=uv_result,
+            chem_flags=chem_flags
+        )
+
+        validation_checks = recommend_validation_checks(st.session_state.method_type)
 
         st.markdown(f"""
         <div class="prop-card">
             <b>🧪 Column recommendation:</b><br>
-            LogP = {p['logp']} → {interpret_logp(p['logp'])}
+            <b>{col_headline}</b><br>
+            {col_explanation}
         </div>
         <div class="prop-card">
             <b>💡 Detection wavelength:</b><br>
@@ -256,6 +741,22 @@ elif st.session_state.stage == 2:
             <b>🧬 SMILES:</b> {smiles}
         </div>
         """, unsafe_allow_html=True)
+
+        if warnings:
+            st.markdown("### ⚠️ Method Warnings")
+            for w in warnings:
+                st.warning(w)
+
+        st.markdown("### 📋 Validation & System Suitability Checks")
+        for check in validation_checks:
+            with st.expander(check["description"]):
+                for item in check["items"]:
+                    st.write(f"- {item}")
+
+        st.divider()
+        st.info("ℹ️ **PubChem Identity Caution:** These recommendations assume the PubChem match (IUPAC name, formula, SMILES) corresponds to your exact analyte and form (isomer / salt / hydrate). Please confirm before using the guidance.")
+        st.info(f"💧 **Solubility Caution:** {chem_flags['solubility_statement']} {chem_flags['solubility_warning']}")
+        st.error("🛑 **Validation Reminder:** Stage 2 outputs are for method scouting only. Final HPLC conditions must be established and validated experimentally (retention, peak shape, specificity, accuracy, precision, solution stability, robustness, and system suitability) before use in real samples or regulatory work.")
 
     st.divider()
     col1, col2 = st.columns([1, 4])
@@ -271,19 +772,70 @@ elif st.session_state.stage == 2:
                 go_next()
                 st.rerun()
 
-# STAGE 3+
-elif st.session_state.stage >= 3:
+# STAGE 3
+elif st.session_state.stage == 3:
+    st.subheader("Stage 3 — Matrix & Sample Preparation")
+    st.write("What kind of sample matrix will you be analyzing?")
+
+    matrix_options = [
+        "Plasma / Serum / Blood",
+        "Urine",
+        "Cell Culture Media",
+        "Tablet / Capsule / Solid Dosage",
+        "Water / Environmental",
+        "Oil / Lipid / Fat",
+        "Other / Standard Solution"
+    ]
+    
+    # Try to pre-select based on existing hints, otherwise default to 'Other'
+    default_idx = len(matrix_options) - 1
+    
+    selected_matrix = st.selectbox("Select Matrix:", matrix_options, index=default_idx)
+
+    st.markdown("### Recommended Sample Preparation")
+    
+    features = st.session_state.get("features", {})
+    method_type = st.session_state.get("method_type", "")
+    
+    prep_info = recommend_sample_prep(selected_matrix, features, method_type)
+    
+    st.info(f"**Overview:** {prep_info['summary']}")
+    
+    st.markdown("#### Steps:")
+    for i, step in enumerate(prep_info['steps'], 1):
+        st.markdown(f"{i}. {step}")
+        
+    if prep_info['warnings']:
+        st.markdown("#### ⚠️ Matrix Warnings:")
+        for w in prep_info['warnings']:
+            st.warning(w)
+
+    st.divider()
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        if st.button("← Back"):
+            go_back()
+            st.rerun()
+    with col2:
+        if st.button("Continue →"):
+            st.session_state.matrix = selected_matrix
+            go_next()
+            st.rerun()
+
+# STAGE 4+
+elif st.session_state.stage >= 4:
     st.subheader(f"Stage {st.session_state.stage} — Coming soon")
     p = st.session_state.properties or {}
     st.markdown(f"""
     <div class="stage-card">
         <b>Method type:</b> {st.session_state.method_type}<br>
+        <b>Matrix:</b> {st.session_state.get('matrix', 'N/A')}<br>
         <b>Compound:</b> {st.session_state.compound}<br>
         <b>LogP:</b> {p.get('logp', 'N/A')}<br>
         <b>Molecular Weight:</b> {p.get('mw', 'N/A')} g/mol
     </div>
     """, unsafe_allow_html=True)
-    st.info("✅ Stages 0, 1, and 2 complete. Next we build Stage 3 — Method Scouting.")
+    st.info(f"✅ Stages 0, 1, 2, and 3 complete. Next we build Stage {st.session_state.stage} — Method Scouting.")
     col1, _ = st.columns([1, 4])
     with col1:
         if st.button("← Back"):
