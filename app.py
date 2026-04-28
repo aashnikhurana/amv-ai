@@ -9,7 +9,7 @@ st.markdown("""
     .stApp, .stMarkdown, p, label { color: #1A3D63 !important; }
     h1, h2, h3 { color: #0A1931 !important; }
     h1 { font-size: 2.2rem !important; }
-    .stButton > button {
+    .stButton > button, .stDownloadButton > button {
         background-color: #B3CFE5 !important;
         color: #1A3D63 !important;
         border: none !important;
@@ -18,14 +18,14 @@ st.markdown("""
         font-size: 1rem !important;
         transition: background-color 0.3s ease, color 0.3s ease;
     }
-    .stButton > button p {
+    .stButton > button p, .stDownloadButton > button p {
         color: #1A3D63 !important;
         transition: color 0.3s ease;
     }
-    .stButton > button:hover { 
+    .stButton > button:hover, .stDownloadButton > button:hover { 
         background-color: #4A7FA7 !important; 
     }
-    .stButton > button:hover p {
+    .stButton > button:hover p, .stDownloadButton > button:hover p {
         color: white !important;
     }
     .stRadio > label { color: #1A3D63 !important; font-weight: 500 !important; }
@@ -55,6 +55,22 @@ st.markdown("""
     }
     .method-card small {
         color: #1A3D63;
+    }
+    
+    [data-testid="stExpander"] {
+        background-color: #F6FAFD !important;
+        border: 1px solid #B3CFE5 !important;
+        border-radius: 8px !important;
+    }
+    [data-testid="stExpander"] summary {
+        background-color: #E9F1F6 !important;
+    }
+    [data-testid="stExpander"] summary p, [data-testid="stExpander"] summary span {
+        color: #0A1931 !important;
+        font-weight: 600 !important;
+    }
+    [data-testid="stExpander"] div[role="region"] {
+        background-color: #F6FAFD !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -822,8 +838,357 @@ elif st.session_state.stage == 3:
             go_next()
             st.rerun()
 
-# STAGE 4+
-elif st.session_state.stage >= 4:
+# STAGE 4 - METHOD SCOUTING
+elif st.session_state.stage == 4:
+    import anthropic
+    import os
+    from dotenv import load_dotenv
+    load_dotenv()
+
+    st.subheader("Stage 4 — Method Scouting")
+    st.write("Based on your compound properties, we will now generate a complete scouting plan.")
+
+    p = st.session_state.properties or {}
+    method_type = st.session_state.method_type or "Assay"
+    matrix = st.session_state.get("matrix", "Not specified")
+
+    st.markdown(f"""
+    <div class="stage-card">
+        <b>Compound:</b> {st.session_state.compound}<br>
+        <b>Method type:</b> {method_type}<br>
+        <b>Matrix:</b> {matrix}<br>
+        <b>LogP:</b> {p.get("logp", "N/A")} &nbsp;|&nbsp;
+        <b>MW:</b> {p.get("mw", "N/A")} g/mol &nbsp;|&nbsp;
+        <b>TPSA:</b> {p.get("tpsa", "N/A")} Ų
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.divider()
+
+    st.markdown("### Before we scout — a few quick questions")
+
+    num_analytes = st.radio(
+        "How many analytes does your method need to separate?",
+        [
+            "1 — just the API, no impurities needed",
+            "2–5 — API plus a few known impurities",
+            "6–15 — API plus many impurities or degradants",
+            "More than 15 — complex mixture"
+        ],
+        key="num_analytes"
+    )
+
+    instruments = st.multiselect(
+        "Which instruments do you have available?",
+        ["HPLC-UV", "HPLC-DAD/PDA", "HPLC-Fluorescence", "HPLC-ELSD"],
+        default=["HPLC-UV"],
+        key="instruments"
+    )
+
+    prior_knowledge = st.text_area(
+        "Any prior knowledge about this compound? (optional)",
+        placeholder="e.g. known to tail on C18, elutes around 5 min, sensitive to pH changes, previously used ACN/water gradient...",
+        key="prior_knowledge"
+    )
+
+    forced_deg = "Not required"
+    if method_type == "Stability-Indicating Assay":
+        forced_deg = st.radio(
+            "Have forced degradation samples been prepared?",
+            [
+                "Yes — I have stressed samples ready",
+                "No — generate the protocol for me"
+            ],
+            key="forced_deg"
+        )
+
+    st.divider()
+
+    if st.button("🧠 Generate Scouting Plan"):
+
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            st.error("API key not found. Check your .env file.")
+        else:
+            SCOUTING_SYSTEM_PROMPT = """You are a senior analytical chemist with 20+ years of HPLC method development experience in pharmaceutical laboratories. You specialize in ICH Q2(R2) compliant methods.
+
+Your job is to generate a practical, immediately actionable HPLC method scouting plan based on the compound profile and study parameters provided.
+
+DECISION RULES YOU APPLY:
+
+COLUMN SELECTION (based on LogP):
+- LogP < 0: HILIC primary. Compound too polar for standard RP.
+- LogP 0–1: C8 or mixed-mode. Limited RP retention expected.
+- LogP 1–4: C18 primary (e.g. Waters XBridge C18, Phenomenex Luna C18, Agilent Zorbax Eclipse Plus C18). This is the ideal RP range.
+- LogP 4–5: C18 with high organic start, or phenyl-hexyl for aromatic compounds.
+- LogP > 5: C4/C8 preferred. C18 risks excessive retention.
+
+MOBILE PHASE pH (based on ionization):
+- Acidic compound (pKa 3–5): Run at pH 2.0–3.0. Use 0.1% formic acid or 10 mM ammonium formate pH 3.
+- Basic compound (pKa 8–10): Run at pH 2.0–3.0 to fully protonate. Low pH suppresses silanol activity.
+- Neutral compound: pH less critical. Use 0.1% formic acid as default.
+- RULE: Always run at least 2 pH units from the pKa.
+
+ISOCRATIC vs GRADIENT:
+- Single analyte, LogP 1–3: Try isocratic first at estimated organic %
+- Multiple analytes or wide polarity range: Use gradient
+- Complex mixtures: Gradient from 5% organic, ramp to 95% over 20 minutes
+
+FORCED DEGRADATION (stability-indicating methods only):
+- Acid hydrolysis: 0.1M HCl, 60°C, 1 hour
+- Base hydrolysis: 0.1M NaOH, 60°C, 1 hour
+- Oxidation: 3% H2O2, room temperature, 24 hours
+- Photolysis: ICH Q1B light exposure, 24 hours
+- Thermal: 60°C dry heat, 1 week
+- Target: 10–30% degradation of API
+
+YOUR OUTPUT FORMAT:
+Provide a complete scouting plan with these exact sections:
+
+1. SCOUTING STRATEGY
+Brief explanation of your approach based on the compound properties.
+
+2. COLUMN CANDIDATES
+List 2–3 columns to scout in priority order. For each: column name, dimensions, particle size, reason for selection.
+
+3. MOBILE PHASE CONDITIONS
+For each column, specify 2 mobile phase conditions to test. Include exact compositions.
+
+4. STARTING GRADIENT
+Exact gradient table (time vs %B) for scouting runs.
+
+5. INSTRUMENT SETTINGS
+Flow rate, column temperature, injection volume, detection wavelength.
+
+6. SCOUTING EXPERIMENT MATRIX
+A clear table showing which experiments to run: Column x Mobile Phase combinations.
+
+7. WHAT TO LOOK FOR
+How to interpret the scouting chromatograms. What constitutes a good result vs a poor result.
+
+8. IF STABILITY-INDICATING
+Forced degradation protocol and how to use stressed samples in scouting.
+
+9. NEXT STEPS
+What to do with the scouting results before proceeding to optimization.
+
+Be specific. Give real numbers. A scientist should be able to walk to their instrument and start immediately."""
+
+            user_message = f"""Generate a complete HPLC method scouting plan for this compound:
+
+COMPOUND PROFILE:
+- Name: {st.session_state.compound}
+- IUPAC: {p.get("iupac", "N/A")}
+- Formula: {p.get("formula", "N/A")}
+- Molecular Weight: {p.get("mw", "N/A")} g/mol
+- LogP: {p.get("logp", "N/A")}
+- TPSA: {p.get("tpsa", "N/A")} Angstrom squared
+- H-bond Donors: {p.get("hbd", "N/A")}
+- H-bond Acceptors: {p.get("hba", "N/A")}
+- SMILES: {p.get("smiles", "N/A")}
+
+STUDY PARAMETERS:
+- Method type: {method_type}
+- Sample matrix: {matrix}
+- Number of analytes to separate: {num_analytes}
+- Available instruments: {", ".join(instruments)}
+- Forced degradation status: {forced_deg}
+
+PRIOR KNOWLEDGE:
+{prior_knowledge if prior_knowledge else "None provided."}
+
+Generate the complete scouting plan now."""
+
+            with st.spinner("We are generating your scouting plan... (this takes 15–30 seconds)"):
+                try:
+                    client = anthropic.Anthropic(api_key=api_key)
+                    message = client.messages.create(
+                        model="claude-sonnet-4-6",
+                        max_tokens=9000,
+                        system=SCOUTING_SYSTEM_PROMPT,
+                        messages=[{"role": "user", "content": user_message}]
+                    )
+                    scouting_plan = message.content[0].text
+                    st.session_state.scouting_plan = scouting_plan
+                except Exception as e:
+                    st.error(f"Claude API error: {str(e)}")
+
+    if st.session_state.get("scouting_plan"):
+        st.divider()
+        st.markdown("### Your Scouting Plan")
+        st.markdown(st.session_state.scouting_plan)
+
+        st.divider()
+        st.download_button(
+            label="📄 Download Scouting Plan",
+            data=st.session_state.scouting_plan,
+            file_name=f"scouting_plan_{st.session_state.compound}.txt",
+            mime="text/plain"
+        )
+
+    st.divider()
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        if st.button("← Back"):
+            go_back()
+            st.rerun()
+    with col2:
+        if st.button("Continue →"):
+            if not st.session_state.get("scouting_plan"):
+                st.warning("Please generate a scouting plan before continuing.")
+            else:
+                go_next()
+                st.rerun()
+
+
+# STAGE 5 - ROBUSTNESS TESTING
+elif st.session_state.stage == 5:
+    import anthropic
+    import os
+    from dotenv import load_dotenv
+    load_dotenv()
+
+    st.subheader("Stage 5 — Robustness Testing")
+    st.write("Test how sensitive your method is to small deliberate changes in conditions.")
+    st.info("Vary one parameter at a time. Run 3 replicates at each condition. Enter the results below.")
+
+    p = st.session_state.properties or {}
+
+    st.markdown("### Your Final Method Conditions")
+    col1, col2 = st.columns(2)
+    with col1:
+        nominal_ph = st.number_input("Nominal mobile phase pH", min_value=1.0, max_value=13.0, value=3.0, step=0.1)
+        nominal_organic = st.number_input("Nominal organic % (e.g. 40 for 40% ACN)", min_value=0.0, max_value=100.0, value=40.0, step=1.0)
+        nominal_flow = st.number_input("Nominal flow rate (mL/min)", min_value=0.1, max_value=5.0, value=1.0, step=0.1)
+    with col2:
+        nominal_temp = st.number_input("Nominal column temperature (°C)", min_value=15.0, max_value=60.0, value=30.0, step=1.0)
+        nominal_wavelength = st.number_input("Nominal detection wavelength (nm)", min_value=190.0, max_value=400.0, value=210.0, step=1.0)
+        nominal_assay = st.number_input("Nominal assay result at standard conditions (%)", min_value=0.0, max_value=200.0, value=100.0, step=0.1)
+
+    st.divider()
+    st.markdown("### Robustness Results")
+    st.write("Enter the mean assay result (%) and %RSD from 3 replicates at each varied condition.")
+    st.write("Leave blank if you have not tested that condition yet.")
+
+    parameters = [
+        ("pH minus", f"pH {round(nominal_ph - 0.2, 1)} (nominal - 0.2)"),
+        ("pH plus", f"pH {round(nominal_ph + 0.2, 1)} (nominal + 0.2)"),
+        ("Organic minus", f"{round(nominal_organic - 2.0, 1)}% organic (nominal - 2%)"),
+        ("Organic plus", f"{round(nominal_organic + 2.0, 1)}% organic (nominal + 2%)"),
+        ("Flow minus", f"{round(nominal_flow - 0.1, 1)} mL/min (nominal - 10%)"),
+        ("Flow plus", f"{round(nominal_flow + 0.1, 1)} mL/min (nominal + 10%)"),
+        ("Temp minus", f"{round(nominal_temp - 5.0, 0):.0f}°C (nominal - 5°C)"),
+        ("Temp plus", f"{round(nominal_temp + 5.0, 0):.0f}°C (nominal + 5°C)"),
+        ("Wavelength minus", f"{round(nominal_wavelength - 2.0, 0):.0f} nm (nominal - 2 nm)"),
+        ("Wavelength plus", f"{round(nominal_wavelength + 2.0, 0):.0f} nm (nominal + 2 nm)"),
+        ("Column lot B", "Different column lot (same spec)"),
+    ]
+
+    results = {}
+    for key, label in parameters:
+        with st.expander(f"📊 {label}"):
+            c1, c2 = st.columns(2)
+            with c1:
+                mean_val = st.number_input(f"Mean assay result (%)", min_value=0.0, max_value=200.0, value=0.0, step=0.1, key=f"mean_{key}")
+            with c2:
+                rsd_val = st.number_input(f"%RSD", min_value=0.0, max_value=100.0, value=0.0, step=0.01, key=f"rsd_{key}")
+            if mean_val > 0:
+                results[key] = {"label": label, "mean": mean_val, "rsd": rsd_val}
+
+    st.divider()
+
+    if st.button("🧠 Assess Robustness"):
+        if not results:
+            st.warning("Please enter at least one robustness result before assessing.")
+        else:
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+
+            ROBUSTNESS_PROMPT = """You are a senior pharmaceutical analytical chemist assessing HPLC method robustness per ICH Q2(R2) guidelines.
+
+ACCEPTANCE CRITERIA:
+- %RSD at each changed condition must be ≤ 2.0%
+- Difference between nominal assay and mean assay at changed condition must be ≤ 2.0%
+- A parameter is CRITICAL if changing it causes either criterion to fail
+- A parameter is NON-CRITICAL if both criteria pass
+
+YOUR OUTPUT:
+1. PARAMETER-BY-PARAMETER ASSESSMENT
+For each tested parameter: PASS or FAIL, the values, and why.
+
+2. CRITICAL PARAMETERS
+List any parameters that failed. These must be tightly controlled in the method specification.
+
+3. NON-CRITICAL PARAMETERS
+List parameters that passed. Normal lab variation is acceptable for these.
+
+4. METHOD OPERABLE DESIGN REGION (MODR)
+State the proven acceptable ranges for each non-critical parameter.
+
+5. OVERALL ROBUSTNESS CONCLUSION
+Is the method robust? What must be added to the method specification?
+
+Be specific. Cite exact values."""
+
+            results_text = f"Nominal assay result: {nominal_assay}%\n\n"
+            for key, data in results.items():
+                diff = abs(data["mean"] - nominal_assay)
+                results_text += f"- {data['label']}: Mean = {data['mean']}%, %RSD = {data['rsd']}%, Difference from nominal = {diff:.1f}%\n"
+
+            user_msg = f"""Assess the robustness of this HPLC method:
+
+COMPOUND: {st.session_state.compound}
+METHOD TYPE: {st.session_state.method_type}
+
+NOMINAL CONDITIONS:
+- pH: {nominal_ph}
+- Organic %: {nominal_organic}%
+- Flow rate: {nominal_flow} mL/min
+- Column temperature: {nominal_temp}°C
+- Detection wavelength: {nominal_wavelength} nm
+
+ROBUSTNESS RESULTS:
+{results_text}
+
+Assess each parameter and provide the complete robustness report."""
+
+            with st.spinner("We are assessing your robustness data..."):
+                try:
+                    client = anthropic.Anthropic(api_key=api_key)
+                    message = client.messages.create(
+                        model="claude-sonnet-4-6",
+                        max_tokens=4096,
+                        system=ROBUSTNESS_PROMPT,
+                        messages=[{"role": "user", "content": user_msg}]
+                    )
+                    robustness_report = message.content[0].text
+                    st.session_state.robustness_report = robustness_report
+                except Exception as e:
+                    st.error(f"Claude API error: {str(e)}")
+
+    if st.session_state.get("robustness_report"):
+        st.divider()
+        st.markdown("### Robustness Assessment")
+        st.markdown(st.session_state.robustness_report)
+        st.download_button(
+            label="📄 Download Robustness Report",
+            data=st.session_state.robustness_report,
+            file_name=f"robustness_{st.session_state.compound}.txt",
+            mime="text/plain"
+        )
+
+    st.divider()
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        if st.button("← Back"):
+            go_back()
+            st.rerun()
+    with col2:
+        if st.button("Continue →"):
+            go_next()
+            st.rerun()
+
+# STAGE 6+
+elif st.session_state.stage >= 6:
     st.subheader(f"Stage {st.session_state.stage} — Coming soon")
     p = st.session_state.properties or {}
     st.markdown(f"""
