@@ -1187,8 +1187,238 @@ Assess each parameter and provide the complete robustness report."""
             go_next()
             st.rerun()
 
-# STAGE 6+
-elif st.session_state.stage >= 6:
+
+# STAGE 6 - PREREQUISITES
+elif st.session_state.stage == 6:
+
+    st.subheader("Stage 6 — Prerequisites Confirmation")
+    st.write("Before formal validation begins, confirm all prerequisites are in place.")
+    st.warning("All items must be confirmed before validation experiments start. Missing prerequisites will be flagged in any regulatory audit.")
+
+    st.markdown("### Reagents & Standards")
+    p1 = st.checkbox("All reagents and solvents are available and within expiry date")
+    p2 = st.checkbox("Reference standard has a valid certificate of analysis (CoA)")
+    p3 = st.checkbox("Reference standard potency/purity is assigned and documented")
+    p4 = st.checkbox("Working standard has been prepared and concentration assigned")
+
+    st.markdown("### Instrument & Column")
+    p5 = st.checkbox("HPLC column is available (new column recommended for validation)")
+    p6 = st.checkbox("Instrument has a current calibration certificate")
+    p7 = st.checkbox("Calibration is not overdue")
+
+    st.markdown("### Personnel & Documentation")
+    p8 = st.checkbox("Analyst has documented training on HPLC operation")
+    p9 = st.checkbox("Analyst has documented training on this method type")
+    p10 = st.checkbox("Method SOP draft has been written and is available")
+
+    all_checked = all([p1, p2, p3, p4, p5, p6, p7, p8, p9, p10])
+
+    st.divider()
+
+    if all_checked:
+        st.success("✅ All prerequisites confirmed. You are ready to begin formal validation.")
+    else:
+        missing = sum([not p1, not p2, not p3, not p4, not p5, not p6, not p7, not p8, not p9, not p10])
+        st.error(f"❌ {missing} prerequisite(s) not yet confirmed. Resolve these before starting validation.")
+
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        if st.button("← Back"):
+            go_back()
+            st.rerun()
+    with col2:
+        if st.button("Continue →"):
+            if not all_checked:
+                st.error("All prerequisites must be confirmed before proceeding to validation.")
+            else:
+                go_next()
+                st.rerun()
+
+# STAGE 7 - FORMAL VALIDATION
+elif st.session_state.stage == 7:
+    import anthropic
+    import os
+    from dotenv import load_dotenv
+    load_dotenv()
+
+    st.subheader("Stage 7 — Formal Method Validation")
+    st.write("Enter your validation data. We will assess each parameter against ICH Q2(R2) acceptance criteria.")
+
+    p = st.session_state.properties or {}
+
+    st.markdown("### System Suitability (SST)")
+    st.write("Enter results from 6 replicate injections of working standard.")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        sst_rsd = st.number_input("Peak area %RSD (6 injections)", 0.0, 100.0, 0.0, 0.01, key="sst_rsd")
+    with col2:
+        sst_tailing = st.number_input("Tailing factor (mean)", 0.0, 10.0, 0.0, 0.01, key="sst_tailing")
+    with col3:
+        sst_plates = st.number_input("Theoretical plates N (mean)", 0, 100000, 0, 100, key="sst_plates")
+
+    st.markdown("### Linearity")
+    st.write("Minimum 5 concentration levels across 80–120% of target concentration.")
+    col1, col2 = st.columns(2)
+    with col1:
+        linearity_r2 = st.number_input("Correlation coefficient R²", 0.0, 1.0, 0.999, 0.0001, format="%.4f", key="lin_r2")
+    with col2:
+        linearity_levels = st.number_input("Number of concentration levels tested", 0, 20, 5, 1, key="lin_levels")
+
+    st.markdown("### Accuracy (Recovery)")
+    st.write("3 levels × 3 replicates: 80%, 100%, 120% of target concentration.")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        acc_80 = st.number_input("Mean recovery at 80% level (%)", 0.0, 200.0, 0.0, 0.1, key="acc_80")
+    with col2:
+        acc_100 = st.number_input("Mean recovery at 100% level (%)", 0.0, 200.0, 0.0, 0.1, key="acc_100")
+    with col3:
+        acc_120 = st.number_input("Mean recovery at 120% level (%)", 0.0, 200.0, 0.0, 0.1, key="acc_120")
+    acc_rsd = st.number_input("Overall %RSD of recoveries", 0.0, 100.0, 0.0, 0.01, key="acc_rsd")
+
+    st.markdown("### Precision")
+    col1, col2 = st.columns(2)
+    with col1:
+        rep_rsd = st.number_input("Repeatability %RSD (6 replicates, same day)", 0.0, 100.0, 0.0, 0.01, key="rep_rsd")
+    with col2:
+        inter_rsd = st.number_input("Intermediate precision %RSD (different day/analyst)", 0.0, 100.0, 0.0, 0.01, key="inter_rsd")
+
+    st.markdown("### LOD / LOQ")
+    col1, col2 = st.columns(2)
+    with col1:
+        lod_sn = st.number_input("Signal-to-noise at LOD", 0.0, 1000.0, 0.0, 0.1, key="lod_sn")
+    with col2:
+        loq_sn = st.number_input("Signal-to-noise at LOQ", 0.0, 1000.0, 0.0, 0.1, key="loq_sn")
+    loq_rsd = st.number_input("LOQ %RSD (6 replicates)", 0.0, 100.0, 0.0, 0.01, key="loq_rsd")
+
+    st.markdown("### Solution Stability")
+    col1, col2 = st.columns(2)
+    with col1:
+        stab_24 = st.number_input("% change from T0 at 24 hours", 0.0, 100.0, 0.0, 0.1, key="stab_24")
+    with col2:
+        stab_48 = st.number_input("% change from T0 at 48 hours", 0.0, 100.0, 0.0, 0.1, key="stab_48")
+
+    st.divider()
+
+    if st.button("✅ Run Full Validation Assessment"):
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+
+        VALIDATION_PROMPT = """You are a senior pharmaceutical analytical chemist and regulatory affairs specialist.
+
+Assess the following HPLC method validation data against ICH Q2(R2) acceptance criteria.
+
+ICH Q2(R2) ACCEPTANCE CRITERIA — apply these exactly:
+
+SYSTEM SUITABILITY:
+- Peak area %RSD ≤ 2.0% (6 injections)
+- Tailing factor ≤ 2.0
+- Theoretical plates N ≥ 2000
+
+LINEARITY:
+- R² ≥ 0.999 for assay methods
+- Minimum 5 concentration levels required
+
+ACCURACY:
+- Mean recovery 98.0–102.0% at each level
+- Overall %RSD ≤ 2.0%
+
+PRECISION:
+- Repeatability %RSD ≤ 2.0%
+- Intermediate precision %RSD ≤ 3.0%
+
+LOD:
+- Signal-to-noise ≥ 3:1
+
+LOQ:
+- Signal-to-noise ≥ 10:1
+- %RSD at LOQ ≤ 10%
+
+SOLUTION STABILITY:
+- ≤ 2.0% change from T0 at each time point
+
+YOUR OUTPUT FORMAT:
+
+OVERALL VALIDATION STATUS: [VALIDATED / NOT VALIDATED / INCOMPLETE]
+
+Then for each parameter:
+PARAMETER NAME
+- Value submitted: [value]
+- Acceptance criterion: [criterion]
+- Status: PASS / FAIL / MISSING DATA
+- Notes: [explanation if fail or borderline]
+
+End with:
+PRIORITY ACTIONS — numbered list of what must be done before this method can be submitted."""
+
+        validation_data = f"""
+COMPOUND: {st.session_state.compound}
+METHOD TYPE: {st.session_state.method_type}
+REGULATORY FRAMEWORK: ICH Q2(R2)
+
+VALIDATION DATA:
+
+System Suitability:
+- Peak area %RSD: {sst_rsd}%
+- Tailing factor: {sst_tailing}
+- Theoretical plates: {sst_plates}
+
+Linearity:
+- R²: {linearity_r2}
+- Number of levels: {linearity_levels}
+
+Accuracy:
+- Recovery at 80%: {acc_80}%
+- Recovery at 100%: {acc_100}%
+- Recovery at 120%: {acc_120}%
+- Overall %RSD: {acc_rsd}%
+
+Precision:
+- Repeatability %RSD: {rep_rsd}%
+- Intermediate precision %RSD: {inter_rsd}%
+
+LOD/LOQ:
+- S/N at LOD: {lod_sn}
+- S/N at LOQ: {loq_sn}
+- LOQ %RSD: {loq_rsd}%
+
+Solution Stability:
+- % change at 24h: {stab_24}%
+- % change at 48h: {stab_48}%
+"""
+
+        with st.spinner("We are assessing your validation data against ICH Q2(R2) criteria..."):
+            try:
+                client = anthropic.Anthropic(api_key=api_key)
+                message = client.messages.create(
+                    model="claude-sonnet-4-6",
+                    max_tokens=4096,
+                    system=VALIDATION_PROMPT,
+                    messages=[{"role": "user", "content": validation_data}]
+                )
+                validation_report = message.content[0].text
+                st.session_state.validation_report = validation_report
+            except Exception as e:
+                st.error(f"Claude API error: {str(e)}")
+
+    if st.session_state.get("validation_report"):
+        st.divider()
+        st.markdown("### Validation Assessment Report")
+        st.markdown(st.session_state.validation_report)
+
+        st.divider()
+        st.success("🎉 Validation assessment complete. Download your report below.")
+        st.download_button(
+            label="📄 Download Validation Report",
+            data=st.session_state.validation_report,
+            file_name=f"validation_report_{st.session_state.compound}.txt",
+            mime="text/plain"
+        )
+
+    col1, _ = st.columns([1, 4])
+    with col1:
+        if st.button("← Back"):
+            go_back()
+            st.rerun()
+
     st.subheader(f"Stage {st.session_state.stage} — Coming soon")
     p = st.session_state.properties or {}
     st.markdown(f"""
