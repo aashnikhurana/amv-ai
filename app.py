@@ -1,5 +1,6 @@
 import streamlit as st
 import requests
+import numpy as np
 
 st.set_page_config(page_title="AMV-AI", page_icon="🔬", layout="centered")
 
@@ -87,8 +88,18 @@ for key, default in {
 
 st.title("🔬 AMV-AI")
 st.caption("Analytical Method Lifecycle Tool")
-st.progress(st.session_state.stage / 7)
-st.caption(f"Stage {st.session_state.stage} of 7")
+st.progress(st.session_state.stage / 8)
+st.caption(f"Stage {st.session_state.stage} of 8")
+
+st.markdown("""
+<div style="background-color:#FFF3CD; border:1px solid #FFC107; border-radius:6px; 
+padding:0.6rem 1rem; margin-bottom:0.5rem; font-size:0.85rem; color:#856404;">
+⚠️ <b>Research & Guidance Tool Only.</b> AMV-AI is not a validated analytical system. 
+All outputs must be reviewed by a qualified analytical chemist. Not suitable for 
+direct regulatory submission without independent experimental verification.
+</div>
+""", unsafe_allow_html=True)
+
 st.divider()
 
 def go_next():
@@ -159,7 +170,10 @@ def interpret_uv(smiles, formula="", extra_hints=None):
         features["aromatic_ring"] = True
 
     # Carbonyl
-    if "C=O" in smiles or "C(=O)" in smiles or "=O" in smiles or "carbonyl" in hints:
+    has_carbonyl_base = "C(=O)" in smiles or "C=O" in smiles or "carbonyl" in hints
+    has_sulfoxide = "S(=O)" in smiles
+    has_phosphate = "P(=O)" in smiles
+    if has_carbonyl_base and not has_sulfoxide and not has_phosphate:
         features["carbonyl"] = True
 
     # Disulfide / Sulfur
@@ -599,6 +613,7 @@ METHOD_CONTEXT = {
 if st.session_state.stage == 0:
     st.subheader("Stage 0 — Instrument Qualification")
     st.write("Has your HPLC instrument been formally qualified?")
+    st.caption("📖 [Read the official FDA Guidance on Analytical Procedures and Methods Validation](https://www.fda.gov/media/87801/download) (outlines equipment qualification requirements)")
 
     q = st.radio(
         "Select your situation:",
@@ -713,6 +728,50 @@ elif st.session_state.stage == 2:
         with col5:
             st.metric("H-bond Acceptors", p['hba'])
 
+        st.warning("⚠️ LogP shown is calculated (XLogP3). For ionizable compounds and salt forms, experimental LogP may differ significantly. Verify against literature before finalizing mobile phase organic content.")
+        
+        iupac_lower = p.get('iupac', '').lower()
+        salt_keywords = ["hydrochloride", "mesylate", "sulfate", "sodium", "potassium", "maleate", "tartrate"]
+        if any(kw in iupac_lower for kw in salt_keywords):
+            st.warning("⚠️ Salt form detected. LogP for the salt form differs from the free base/acid. Method development should use free base/acid LogP where possible.")
+
+        st.markdown("### pKa (Required for ionizable compounds)")
+        st.write("PubChem does not reliably provide pKa. Enter it manually if known.")
+
+        pka_known = st.radio("Do you know the pKa of your compound?", 
+            ["No — compound is neutral (no ionizable groups)",
+             "Yes — acidic compound (carboxylic acid, phenol, sulfonamide)",
+             "Yes — basic compound (amine, imidazole, pyridine)",
+             "Yes — amphoteric (has both acidic and basic groups)"])
+
+        pka_data = {"type": "neutral", "acidic": None, "basic": None, "recommendation": ""}
+
+        if pka_known == "Yes — acidic compound (carboxylic acid, phenol, sulfonamide)":
+            pka_data["type"] = "acidic"
+            pka_data["acidic"] = st.number_input("Acidic pKa", value=4.0, step=0.1)
+            pka_data["recommendation"] = f"Run mobile phase at pH {pka_data['acidic']-2:.1f} to {pka_data['acidic']-3:.1f}. This ensures fully protonated (neutral) form for reproducible retention."
+            st.info(pka_data["recommendation"])
+        elif pka_known == "Yes — basic compound (amine, imidazole, pyridine)":
+            pka_data["type"] = "basic"
+            pka_data["basic"] = st.number_input("Basic pKa", value=9.0, step=0.1)
+            pka_data["recommendation"] = f"Run mobile phase at pH {pka_data['basic']-2:.1f} or lower. This fully protonates the amine and suppresses silanol interactions."
+            st.info(pka_data["recommendation"])
+        elif pka_known == "Yes — amphoteric (has both acidic and basic groups)":
+            pka_data["type"] = "amphoteric"
+            c1, c2 = st.columns(2)
+            with c1:
+                pka_data["acidic"] = st.number_input("Acidic pKa", value=4.0, step=0.1)
+            with c2:
+                pka_data["basic"] = st.number_input("Basic pKa", value=9.0, step=0.1)
+            pka_data["recommendation"] = "Run between the two pKa values or test both pH extremes. This compound class requires experimental pH scouting."
+            st.info(pka_data["recommendation"])
+        else:
+            pka_data["recommendation"] = "pH has minimal effect on retention. Use 0.1% formic acid as default."
+            st.info(pka_data["recommendation"])
+
+        st.caption("Don't know your pKa? Calculate it free at chemicalize.com using your SMILES string.")
+        st.session_state.pka_data = pka_data
+
         st.markdown("### What this means for your method")
 
         uv_result, features = interpret_uv(smiles, p.get('formula', ''), extra_hints)
@@ -772,7 +831,6 @@ elif st.session_state.stage == 2:
         st.divider()
         st.info("ℹ️ **PubChem Identity Caution:** These recommendations assume the PubChem match (IUPAC name, formula, SMILES) corresponds to your exact analyte and form (isomer / salt / hydrate). Please confirm before using the guidance.")
         st.info(f"💧 **Solubility Caution:** {chem_flags['solubility_statement']} {chem_flags['solubility_warning']}")
-        st.error("🛑 **Validation Reminder:** Stage 2 outputs are for method scouting only. Final HPLC conditions must be established and validated experimentally (retention, peak shape, specificity, accuracy, precision, solution stability, robustness, and system suitability) before use in real samples or regulatory work.")
 
     st.divider()
     col1, col2 = st.columns([1, 4])
@@ -986,6 +1044,7 @@ COMPOUND PROFILE:
 - H-bond Donors: {p.get("hbd", "N/A")}
 - H-bond Acceptors: {p.get("hba", "N/A")}
 - SMILES: {p.get("smiles", "N/A")}
+- pKa Data: {st.session_state.get('pka_data', {}).get('type', 'N/A')} (Acidic: {st.session_state.get('pka_data', {}).get('acidic', 'N/A')}, Basic: {st.session_state.get('pka_data', {}).get('basic', 'N/A')})
 
 STUDY PARAMETERS:
 - Method type: {method_type}
@@ -1026,6 +1085,39 @@ Generate the complete scouting plan now."""
             mime="text/plain"
         )
 
+        st.divider()
+        st.markdown("### Record Your Selected Method Conditions")
+        st.write("After running your scouting experiments, enter the conditions you selected. These will carry forward to robustness testing.")
+
+        with st.expander("Enter final selected conditions (required before continuing)"):
+            selected_column = st.text_input("Selected column (name, dimensions, particle size)", 
+                placeholder="e.g. Waters XBridge C18, 150x4.6mm, 3.5μm", key="sel_column")
+            selected_mpa = st.text_input("Mobile Phase A", 
+                placeholder="e.g. 0.1% Formic acid in water", key="sel_mpa")
+            selected_mpb = st.text_input("Mobile Phase B", 
+                placeholder="e.g. Acetonitrile", key="sel_mpb")
+            selected_gradient = st.text_area("Gradient or isocratic conditions", 
+                placeholder="e.g. 5% B to 60% B over 15 min, hold 3 min, re-equilibrate 5 min", key="sel_gradient")
+            selected_flow = st.number_input("Flow rate (mL/min)", 0.1, 5.0, 1.0, 0.1, key="sel_flow")
+            selected_temp = st.number_input("Column temperature (°C)", 15.0, 60.0, 30.0, 1.0, key="sel_temp")
+            selected_wavelength = st.number_input("Detection wavelength (nm)", 190.0, 400.0, 254.0, 1.0, key="sel_wavelength")
+            observed_rt = st.number_input("Observed analyte retention time (min)", 0.0, 60.0, 0.0, 0.1, key="sel_rt")
+            observed_tailing = st.number_input("Observed tailing factor", 0.0, 10.0, 0.0, 0.01, key="sel_tailing")
+            observed_plates = st.number_input("Observed theoretical plates (N)", 0, 100000, 0, 100, key="sel_plates")
+            
+            st.session_state.final_method = {
+                "column": selected_column,
+                "mpa": selected_mpa,
+                "mpb": selected_mpb,
+                "gradient": selected_gradient,
+                "flow": selected_flow,
+                "temp": selected_temp,
+                "wavelength": selected_wavelength,
+                "rt": observed_rt,
+                "tailing": observed_tailing,
+                "plates": observed_plates
+            }
+
     st.divider()
     col1, col2 = st.columns([1, 4])
     with col1:
@@ -1036,6 +1128,8 @@ Generate the complete scouting plan now."""
         if st.button("Continue →"):
             if not st.session_state.get("scouting_plan"):
                 st.warning("Please generate a scouting plan before continuing.")
+            elif not st.session_state.get("final_method", {}).get("column"):
+                st.warning("Please record your selected method conditions before continuing.")
             else:
                 go_next()
                 st.rerun()
@@ -1053,22 +1147,34 @@ elif st.session_state.stage == 5:
     st.info("Vary one parameter at a time. Run 3 replicates at each condition. Enter the results below.")
 
     p = st.session_state.properties or {}
+    fm = st.session_state.get("final_method", {})
+
+    if fm:
+        st.markdown(f"""
+        <div class="method-card">
+            <b>Selected Column:</b> {fm.get('column', 'N/A')}<br>
+            <b>Mobile Phase A:</b> {fm.get('mpa', 'N/A')}<br>
+            <b>Mobile Phase B:</b> {fm.get('mpb', 'N/A')}<br>
+            <b>Gradient:</b> {fm.get('gradient', 'N/A')}
+        </div>
+        """, unsafe_allow_html=True)
 
     st.markdown("### Your Final Method Conditions")
     col1, col2 = st.columns(2)
     with col1:
         nominal_ph = st.number_input("Nominal mobile phase pH", min_value=1.0, max_value=13.0, value=3.0, step=0.1)
         nominal_organic = st.number_input("Nominal organic % (e.g. 40 for 40% ACN)", min_value=0.0, max_value=100.0, value=40.0, step=1.0)
-        nominal_flow = st.number_input("Nominal flow rate (mL/min)", min_value=0.1, max_value=5.0, value=1.0, step=0.1)
+        nominal_flow = st.number_input("Nominal flow rate (mL/min)", min_value=0.1, max_value=5.0, value=float(fm.get("flow", 1.0)), step=0.1)
     with col2:
-        nominal_temp = st.number_input("Nominal column temperature (°C)", min_value=15.0, max_value=60.0, value=30.0, step=1.0)
-        nominal_wavelength = st.number_input("Nominal detection wavelength (nm)", min_value=190.0, max_value=400.0, value=210.0, step=1.0)
+        nominal_temp = st.number_input("Nominal column temperature (°C)", min_value=15.0, max_value=60.0, value=float(fm.get("temp", 30.0)), step=1.0)
+        nominal_wavelength = st.number_input("Nominal detection wavelength (nm)", min_value=190.0, max_value=400.0, value=float(fm.get("wavelength", 210.0)), step=1.0)
         nominal_assay = st.number_input("Nominal assay result at standard conditions (%)", min_value=0.0, max_value=200.0, value=100.0, step=0.1)
 
     st.divider()
+    st.divider()
     st.markdown("### Robustness Results")
-    st.write("Enter the mean assay result (%) and %RSD from 3 replicates at each varied condition.")
-    st.write("Leave blank if you have not tested that condition yet.")
+    st.write("Enter the 3 individual replicate assay results (%) at each varied condition.")
+    st.write("Leave blank (0.0) if you have not tested that condition yet.")
 
     parameters = [
         ("pH minus", f"pH {round(nominal_ph - 0.2, 1)} (nominal - 0.2)"),
@@ -1087,13 +1193,24 @@ elif st.session_state.stage == 5:
     results = {}
     for key, label in parameters:
         with st.expander(f"📊 {label}"):
-            c1, c2 = st.columns(2)
+            c1, c2, c3 = st.columns(3)
             with c1:
-                mean_val = st.number_input(f"Mean assay result (%)", min_value=0.0, max_value=200.0, value=0.0, step=0.1, key=f"mean_{key}")
+                rep1 = st.number_input("Replicate 1 (%)", min_value=0.0, max_value=200.0, value=0.0, step=0.1, key=f"r1_{key}")
             with c2:
-                rsd_val = st.number_input(f"%RSD", min_value=0.0, max_value=100.0, value=0.0, step=0.01, key=f"rsd_{key}")
-            if mean_val > 0:
-                results[key] = {"label": label, "mean": mean_val, "rsd": rsd_val}
+                rep2 = st.number_input("Replicate 2 (%)", min_value=0.0, max_value=200.0, value=0.0, step=0.1, key=f"r2_{key}")
+            with c3:
+                rep3 = st.number_input("Replicate 3 (%)", min_value=0.0, max_value=200.0, value=0.0, step=0.1, key=f"r3_{key}")
+            
+            if rep1 > 0 and rep2 > 0 and rep3 > 0:
+                vals = [rep1, rep2, rep3]
+                mean_val = np.mean(vals)
+                rsd_val = (np.std(vals, ddof=1) / mean_val * 100) if mean_val > 0 else 0.0
+                diff = abs(mean_val - nominal_assay)
+                
+                st.caption(f"**Mean:** {mean_val:.2f}% | **%RSD:** {rsd_val:.2f}% | **Diff from Nominal:** {diff:.2f}%")
+                results[key] = {"label": label, "mean": round(mean_val, 2), "rsd": round(rsd_val, 2)}
+            elif rep1 > 0 or rep2 > 0 or rep3 > 0:
+                st.warning("⚠️ Minimum 3 replicates required per ICH Q2(R2)")
 
     st.divider()
 
@@ -1246,6 +1363,35 @@ elif st.session_state.stage == 7:
 
     p = st.session_state.properties or {}
 
+    st.markdown("### Specificity / Selectivity")
+    st.write("ICH Q2(R2) requires this as the first validation parameter.")
+
+    blank_result = st.radio(
+        "Blank injection — is there any peak at the analyte retention time?",
+        ["No peak detected — blank is clean ✅",
+         "Peak detected — interference present ❌",
+         "Not yet tested"])
+
+    placebo_result = st.radio(
+        "Placebo injection (formulation without API) — any co-eluting peak with analyte?",
+        ["No interference detected ✅",
+         "Interference detected ❌", 
+         "Not applicable — pure API, no excipients",
+         "Not yet tested"])
+
+    peak_purity = st.number_input(
+        "Peak purity index (PDA/DAD only — leave 0 if UV detector only)",
+        min_value=0.0, max_value=1.0, value=0.0, step=0.001, format="%.3f",
+        key="peak_purity")
+
+    degradant_resolution = "Not evaluated"
+    if "Stability" in st.session_state.method_type:
+        degradant_resolution = st.radio(
+            "Are all forced degradation products baseline resolved from the API peak?",
+            ["Yes — all degradants resolved (Rs ≥ 2.0) ✅",
+             "No — one or more degradants co-elute with API ❌",
+             "Not yet tested"])
+
     st.markdown("### System Suitability (SST)")
     st.write("Enter results from 6 replicate injections of working standard.")
     col1, col2, col3 = st.columns(3)
@@ -1280,9 +1426,44 @@ elif st.session_state.stage == 7:
     with col1:
         rep_rsd = st.number_input("Repeatability %RSD (6 replicates, same day)", 0.0, 100.0, 0.0, 0.01, key="rep_rsd")
     with col2:
-        inter_rsd = st.number_input("Intermediate precision %RSD (different day/analyst)", 0.0, 100.0, 0.0, 0.01, key="inter_rsd")
+        rep_mean = st.number_input("Repeatability mean assay (%)", 0.0, 200.0, 100.0, 0.1, key="rep_mean")
+
+    st.markdown("#### Intermediate Precision (Day 2 / Different Analyst)")
+    st.write("Enter the 6 individual assay results from the second day/analyst:")
+
+    inter_values = []
+    cols = st.columns(3)
+    for i in range(6):
+        with cols[i % 3]:
+            val = st.number_input(f"IP Result {i+1} (%)", 0.0, 200.0, 0.0, 0.1, key=f"ip_{i}")
+            inter_values.append(val)
+            
+    inter_valid = [v for v in inter_values if v > 0]
+    inter_rsd_calc = 0.0
+    inter_mean = 0.0
+    if len(inter_valid) >= 6:
+        inter_mean = np.mean(inter_valid)
+        inter_rsd_calc = (np.std(inter_valid, ddof=1) / inter_mean * 100) if inter_mean > 0 else 0.0
+        diff_means = abs(inter_mean - rep_mean)
+        st.caption(f"**Calculated IP %RSD:** {inter_rsd_calc:.2f}%")
+        st.caption(f"**Difference between Day 1 and Day 2 means:** {diff_means:.2f}% (must be ≤ 2.0%)")
+    elif any(v > 0 for v in inter_values):
+        st.warning("Minimum 6 determinations required")
 
     st.markdown("### LOD / LOQ")
+    sn_method = st.radio(
+        "How was signal-to-noise ratio measured?",
+        ["Automatic calculation by chromatography software (recommended)",
+         "Manual measurement — peak height divided by peak-to-peak baseline noise",
+         "Standard deviation method — from blank injections",
+         "Not yet measured"])
+
+    if sn_method == "Manual measurement — peak height divided by peak-to-peak baseline noise":
+        st.warning("⚠️ Manual S/N measurement is least reproducible. Document the exact noise region used (start and end retention time). Ensure noise window is at least 20× the peak width and free of peaks.")
+
+    if sn_method == "Not yet measured":
+        st.info("LOD and LOQ will be reported as MISSING DATA in the validation assessment.")
+
     col1, col2 = st.columns(2)
     with col1:
         lod_sn = st.number_input("Signal-to-noise at LOD", 0.0, 1000.0, 0.0, 0.1, key="lod_sn")
@@ -1307,6 +1488,12 @@ elif st.session_state.stage == 7:
 Assess the following HPLC method validation data against ICH Q2(R2) acceptance criteria.
 
 ICH Q2(R2) ACCEPTANCE CRITERIA — apply these exactly:
+
+SPECIFICITY:
+- Blank: no peak at analyte retention time
+- Placebo: no excipient co-eluting with analyte  
+- Peak purity index ≥ 0.99 where PDA is available
+- Stability-indicating: all degradants resolved from API (Rs ≥ 2.0)
 
 SYSTEM SUITABILITY:
 - Peak area %RSD ≤ 2.0% (6 injections)
@@ -1356,6 +1543,12 @@ REGULATORY FRAMEWORK: ICH Q2(R2)
 
 VALIDATION DATA:
 
+Specificity:
+- Blank injection: {blank_result}
+- Placebo injection: {placebo_result}
+- Peak purity: {peak_purity}
+- Degradant resolution: {degradant_resolution}
+
 System Suitability:
 - Peak area %RSD: {sst_rsd}%
 - Tailing factor: {sst_tailing}
@@ -1372,10 +1565,13 @@ Accuracy:
 - Overall %RSD: {acc_rsd}%
 
 Precision:
+- Repeatability mean: {rep_mean}%
 - Repeatability %RSD: {rep_rsd}%
-- Intermediate precision %RSD: {inter_rsd}%
+- Intermediate precision mean: {inter_mean:.2f}%
+- Intermediate precision %RSD: {inter_rsd_calc:.2f}%
 
 LOD/LOQ:
+- S/N Method: {sn_method}
 - S/N at LOD: {lod_sn}
 - S/N at LOQ: {loq_sn}
 - LOQ %RSD: {loq_rsd}%
@@ -1419,6 +1615,8 @@ Solution Stability:
             go_back()
             st.rerun()
 
+# STAGE 8+
+elif st.session_state.stage >= 8:
     st.subheader(f"Stage {st.session_state.stage} — Coming soon")
     p = st.session_state.properties or {}
     st.markdown(f"""
