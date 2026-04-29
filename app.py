@@ -32,8 +32,20 @@ st.markdown("""
     .stRadio > label { color: #1A3D63 !important; font-weight: 500 !important; }
     hr { border-color: #B3CFE5 !important; }
     .stProgress > div > div { background-color: #1A3D63 !important; }
-    [data-testid="stMetricValue"] { color: #0A1931 !important; font-weight: 700 !important; }
-    [data-testid="stMetricLabel"] { color: #1A3D63 !important; }
+    [data-testid="stMetricValue"] { 
+        color: #0A1931 !important; 
+        font-weight: 700 !important; 
+        justify-content: center;
+    }
+    [data-testid="stMetricLabel"] { 
+        color: #1A3D63 !important; 
+        justify-content: center;
+    }
+    [data-testid="stMetric"] {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
     
     .stage-card, .prop-card, .method-card {
         background-color: transparent;
