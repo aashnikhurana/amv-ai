@@ -734,11 +734,6 @@ elif st.session_state.stage == 2:
         with col3:
             st.metric("TPSA", f"{p['tpsa']} Ų")
 
-        col4, col5 = st.columns(2)
-        with col4:
-            st.metric("H-bond Donors", p['hbd'])
-        with col5:
-            st.metric("H-bond Acceptors", p['hba'])
 
         st.warning("⚠️ LogP shown is calculated (XLogP3). For ionizable compounds and salt forms, experimental LogP may differ significantly. Verify against literature before finalizing mobile phase organic content.")
         
