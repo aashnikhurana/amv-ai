@@ -158,14 +158,14 @@ def interpret_uv(smiles, formula="", extra_hints=None):
     """
     Analyzes chemical properties to identify chromophores using the knowledge base.
     Returns:
-        html_output (str): Formatted HTML bullet points for the UI.
-        features (dict): Normalized boolean flags for downstream logic.
+        html_output (str)
+        features (dict)
+        uv_meta (dict)
     """
     smiles = smiles or ""
     formula = formula or ""
     hints = (extra_hints or "").lower()
 
-    # 1. Normalize features
     features = {
         "aromatic_ring": False,
         "heteroaromatic_ring": False,
@@ -178,115 +178,116 @@ def interpret_uv(smiles, formula="", extra_hints=None):
         "conjugated_alkene": False,
         "alkene": False,
         "alkyne": False,
+        "weak_uv": False,
     }
 
-    # Heteroaromatic: n, o, s in lowercase inside rings, or keywords
-    if any(c in smiles for c in ["n", "o", "s"] if c.islower()) or \
-       any(kw in hints for kw in ["pyridine", "indole", "heteroaromatic", "imidazole", "thiazole"]):
+    uv_meta = {
+        "deep_uv": False,
+        "approximate_only": True,
+    }
+
+    if any(c in smiles for c in ["n", "o", "s"]) or any(kw in hints for kw in ["pyridine", "indole", "heteroaromatic", "imidazole", "thiazole"]):
         features["heteroaromatic_ring"] = True
-        
-    # Aromatic: c in lowercase inside rings, or keywords (if heteroaromatic is true, we might still set aromatic to true, but distinguish)
-    if ("c" in smiles) or any(kw in hints for kw in ["benzene", "phenyl", "aromatic"]):
+
+    if ("c" in smiles.lower()) or any(kw in hints for kw in ["benzene", "phenyl", "aromatic"]):
         features["aromatic_ring"] = True
 
-    # Carbonyl
-    has_carbonyl_base = "C(=O)" in smiles or "C=O" in smiles or "carbonyl" in hints
-    has_sulfoxide = "S(=O)" in smiles
-    has_phosphate = "P(=O)" in smiles
-    if has_carbonyl_base and not has_sulfoxide and not has_phosphate:
+    if "C=O" in smiles or "C(=O)" in smiles or "=O" in smiles or "carbonyl" in hints:
         features["carbonyl"] = True
 
-    # Disulfide / Sulfur
-    if "SS" in smiles or "SS" in formula or re.search(r'S[2-9]', formula) or \
-       any(kw in hints for kw in ["ss bond", "s-s bond", "disulfide", "sulfide"]):
+    if "SS" in smiles or "SS" in formula or re.search(r'S[2-9]', formula) or any(kw in hints for kw in ["ss bond", "s-s bond", "disulfide", "sulfide"]):
         features["disulfide"] = True
 
-    # Nitro
     if "N(=O)" in smiles or "[N+](=O)" in smiles or "NO2" in formula or "nitro" in hints:
         features["nitro"] = True
 
-    # Azo
     if "N=N" in smiles or "azo" in hints:
         features["azo"] = True
-        
-    # Conjugated Alkene (heuristic: multiple double bonds close to each other, or hint)
+
     if "=C-C=" in smiles or "C=C-C=C" in smiles or "conjugat" in hints:
         features["conjugated_alkene"] = True
     elif "=" in smiles and not features["carbonyl"]:
         features["alkene"] = True
-        
-    # Alkyne
+
     if "#" in smiles or "alkyne" in hints:
         features["alkyne"] = True
 
-    # Nucleic Acid
     if any(kw in hints for kw in ["dna", "rna", "nucleic", "oligonucleotide"]):
         features["nucleic_acid"] = True
 
-    # Peptide / Protein
     if any(kw in hints for kw in ["peptide", "protein", "mab", "antibody"]):
         features["peptide_or_protein"] = True
 
-    # 2. Map features to recommendations using CHROMOPHORE_RULES
     results = []
     has_strong = features["aromatic_ring"] or features["heteroaromatic_ring"] or features["conjugated_alkene"]
 
-    # Evaluate rules
     if features["heteroaromatic_ring"]:
         rule = CHROMOPHORE_RULES["heteroaromatic_ring"]
         results.append(f"• <b>{rule['description']}</b> → {rule['recommendation']}")
-    elif features["aromatic_ring"]: # Else-if to avoid redundant aromatic warnings if heteroaromatic is present
+    elif features["aromatic_ring"]:
         rule = CHROMOPHORE_RULES["aromatic_ring"]
         results.append(f"• <b>{rule['description']}</b> → {rule['recommendation']}")
 
     if features["conjugated_alkene"]:
         rule = CHROMOPHORE_RULES["conjugated_alkene"]
         results.append(f"• <b>{rule['description']}</b> → {rule['recommendation']}")
+        uv_meta["deep_uv"] = True
 
     if features["carbonyl"]:
         rule = CHROMOPHORE_RULES["carbonyl"]
         results.append(f"• <b>{rule['description']}</b> → {rule['recommendation']}")
+        uv_meta["deep_uv"] = True
 
     if features["disulfide"]:
         rule = CHROMOPHORE_RULES["disulfide"]
         results.append(f"• <b>{rule['description']}</b> → {rule['recommendation']}")
+        uv_meta["deep_uv"] = True
 
     if features["nitro"]:
         rule = CHROMOPHORE_RULES["nitro"]
         if has_strong:
-            results.append(f"• <b>{rule['description']}</b> → Useful bands at 254 nm and 330 nm. Monitor 330 nm if low UV background is poor.")
+            results.append("• <b>Nitro group</b> → Useful bands may be observed around 254 nm and sometimes higher wavelengths; confirm experimentally.")
         else:
-            results.append(f"• <b>{rule['description']}</b> → Strong at 254 nm. Recommend monitoring this channel.")
+            results.append("• <b>Nitro group</b> → Likely useful UV response around 254 nm; confirm experimentally.")
 
     if features["azo"]:
         rule = CHROMOPHORE_RULES["azo"]
         results.append(f"• <b>{rule['description']}</b> → {rule['recommendation']}")
-        
+
     if features["nucleic_acid"]:
         rule = CHROMOPHORE_RULES["nucleic_acid"]
         results.append(f"• <b>{rule['description']}</b> → {rule['recommendation']}")
-        
+
     if features["peptide_or_protein"]:
         rule = CHROMOPHORE_RULES["peptide_or_protein"]
         results.append(f"• <b>{rule['description']}</b> → {rule['recommendation']}")
+        uv_meta["deep_uv"] = True
 
     if not results:
-        # Check deep UV options
         if features["alkene"]:
             rule = CHROMOPHORE_RULES["alkene"]
             results.append(f"• <b>{rule['description']}</b> → {rule['recommendation']}")
+            uv_meta["deep_uv"] = True
+            features["weak_uv"] = True
         elif features["alkyne"]:
             rule = CHROMOPHORE_RULES["alkyne"]
             results.append(f"• <b>{rule['description']}</b> → {rule['recommendation']}")
+            uv_meta["deep_uv"] = True
+            features["weak_uv"] = True
         else:
             results.append("• ⚠️ <b>No strong chromophore</b> → UV response is predicted to be weak; consider PDA scanning to confirm signal and be prepared to use MS, ELSD/CAD, or derivatization if sensitivity is inadequate.")
+            features["weak_uv"] = True
 
     html_output = "<br>".join(results)
-    
-    if any(str(wl) in html_output for wl in [190, 195, 200, 205, 210, 214, 215, 220]):
-        html_output += "<br><br>⚠️ <i>Note: Recommended λ values are approximate detection windows. At deep-UV (< 220 nm), organic solvents and buffers may have significant absorbance and cause baseline noise/drift. Acetonitrile has a lower UV cut-off than methanol and is usually preferred.</i>"
+    html_output += "<br><br><i>Note: Recommended wavelengths are approximate detection windows, not validated λmax values.</i>"
 
-    return html_output, features
+    if uv_meta["deep_uv"]:
+        html_output += (
+            "<br><br>⚠️ <i>Deep-UV caution: below about 220 nm, mobile-phase and buffer background can be significant. "
+            "Acetonitrile generally has a lower UV cutoff than methanol and is often preferred for low-wavelength detection.</i>"
+        )
+
+    return html_output, features, uv_meta
 
 def assess_additional_properties(smiles, formula, hints, logp, tpsa):
     """
