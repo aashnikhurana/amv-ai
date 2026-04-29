@@ -500,6 +500,112 @@ def recommend_column(logp, tpsa, mw, features, method_type, matrix):
 
     return rec, expl + "<br><br><i>Note: This selection is a structure-based starting point; final column choice must be confirmed experimentally (retention, peak shape, resolution, robustness).</i>"
 
+def recommend_mobile_phase_ph(chem_flags, method_type):
+    """
+    Conservative pH scouting suggestion. Never invent pKa.
+    """
+    method_type = (method_type or "").lower()
+
+    if chem_flags.get("amphoteric"):
+        return (
+            "Start with pH scouting at two points (for example, mildly acidic and near-neutral) because amphoteric compounds can change retention sharply with pH.",
+            "Actual pKa values are needed before finalizing pH. Standard silica RP columns are commonly safest within roughly pH 2–8 unless the specific column is rated otherwise."
+        )
+
+    if chem_flags.get("acidic"):
+        return (
+            "For RP-HPLC, start scouting under mildly acidic conditions (for example around pH 2.5–3.5) to reduce ionization and improve retention/peak shape.",
+            "Final pH must be confirmed experimentally; avoid assuming this is optimal without pKa data. Check the specific column’s pH rating."
+        )
+
+    if chem_flags.get("basic"):
+        return (
+            "For RP-HPLC, start scouting under acidic conditions (for example around pH 3–4) to reduce ionization and often improve peak shape for basic analytes.",
+            "Basic compounds can also show silanol interactions; temperature, buffer choice, and column chemistry may matter. Check the specific column’s pH rating before exploring higher pH."
+        )
+
+    return (
+        "If the analyte appears largely neutral, begin with a conventional mildly acidic to neutral RP condition and optimize experimentally.",
+        "Use the column manufacturer’s stated pH range; many silica-based RP columns are commonly used in about the pH 2–8 region."
+    )
+
+
+def recommend_elution_mode(logp, method_type, chem_flags):
+    """
+    Suggest isocratic vs gradient as a starting point.
+    """
+    method_type_l = (method_type or "").lower()
+    try:
+        logp_val = float(logp)
+    except:
+        logp_val = None
+
+    if "stability" in method_type_l or "impurity" in method_type_l:
+        return (
+            "Gradient elution is the preferred starting point.",
+            "These methods prioritize specificity across multiple components and degradants, so a gradient is usually more informative during scouting."
+        )
+
+    if "bioanalytical" in method_type_l:
+        return (
+            "Start with gradient elution plus a strong wash step.",
+            "Biological matrices often benefit from a wash step to reduce carryover and contamination."
+        )
+
+    if logp_val is not None and 1 <= logp_val <= 3 and not chem_flags.get("amphoteric"):
+        return (
+            "Isocratic elution is a reasonable starting point.",
+            "For a single main analyte with moderate retention, isocratic conditions can be simpler and robust."
+        )
+
+    return (
+        "Begin with a short scouting gradient, then convert to isocratic only if retention/selectivity are simple.",
+        "A scouting gradient gives faster information when analyte behavior is uncertain."
+    )
+
+
+def recommend_temperature(chem_flags, method_type):
+    """
+    Starting column temperature suggestion.
+    """
+    method_type_l = (method_type or "").lower()
+
+    if chem_flags.get("basic"):
+        return (
+            "Start around 35–45 °C.",
+            "Slightly elevated temperature can improve peak shape for some basic compounds and reduce secondary interactions."
+        )
+
+    if any("stability" in w.lower() for w in chem_flags.get("stability_warnings", [])):
+        return (
+            "Begin near ambient to 30 °C unless analyte stability is confirmed.",
+            "Potentially labile compounds should not be assumed to tolerate elevated temperature."
+        )
+
+    if "bioanalytical" in method_type_l:
+        return (
+            "Start around 35–40 °C.",
+            "This is a common practical range for reproducibility and lower backpressure."
+        )
+
+    return (
+        "Start around 30–40 °C.",
+        "This is a common method-scouting temperature range for many small-molecule RP methods."
+    )
+
+
+def recommend_guard_column(matrix, method_type):
+    matrix_l = (matrix or "").lower()
+    method_type_l = (method_type or "").lower()
+
+    if any(m in matrix_l for m in ["plasma", "serum", "blood", "urine", "tissue", "oil", "lipid", "fat", "food", "cell culture"]):
+        return "Strongly recommended — complex or fouling-prone matrix."
+
+    if "bioanalytical" in method_type_l:
+        return "Strongly recommended — protects the analytical column from matrix contamination."
+
+    return "Optional but recommended for routine work and column protection."
+
 def recommend_sample_prep(matrix, features, method_type):
     """
     Recommends sample preparation steps based on knowledge base rules.
