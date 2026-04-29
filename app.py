@@ -290,88 +290,155 @@ def interpret_uv(smiles, formula="", extra_hints=None):
 
 def assess_additional_properties(smiles, formula, hints, logp, tpsa):
     """
-    Evaluates ionization, solubility expectations, and chemical stability based on SMILES and hints.
+    Evaluates ionization, solubility expectations, salt/hydrate form, and chemical stability
+    using conservative heuristics. Never invent numeric pKa or solubility values.
     """
     smiles = smiles or ""
     formula = formula or ""
     hints = (hints or "").lower()
-    
-    try: logp_val = float(logp)
-    except: logp_val = None
-    try: tpsa_val = float(tpsa)
-    except: tpsa_val = None
+
+    try:
+        logp_val = float(logp)
+    except:
+        logp_val = None
+
+    try:
+        tpsa_val = float(tpsa)
+    except:
+        tpsa_val = None
 
     flags = {
         "acidic": False,
         "basic": False,
         "amphoteric": False,
+        "ionization_warning": None,
         "hydrolysis_risk": [],
-        "oxidation_risk": []
+        "oxidation_risk": [],
+        "stability_warnings": [],
+        "solubility_statement": None,
+        "solubility_warning": None,
+        "salt_flags": [],
+        "hydrate_flag": None,
     }
 
-    # 1. Ionization & pKa awareness
-    if any(m in smiles for m in ["C(=O)O", "S(=O)(=O)O", "P(=O)(O)O"]) or \
-       any(kw in hints for kw in ["carboxylic acid", "benzoic acid", "acetic acid", "sulfonic acid", "phosphate", "phosphonate", "phenol", "tyrosine"]):
+    # -------------------------
+    # 1. Acid / base heuristics
+    # -------------------------
+    acidic_keywords = [
+        "carboxylic acid", "benzoic acid", "acetic acid", "sulfonic acid",
+        "phosphate", "phosphonate", "phosphoric acid", "phenol", "tyrosine"
+    ]
+    basic_keywords = [
+        "amine", "guanidine", "guanidinium", "biguanide", "piperidine",
+        "piperazine", "pyrrolidine", "pyridine", "imidazole", "morpholine"
+    ]
+    amphoteric_keywords = ["amino acid", "peptide", "betaine", "zwitterion", "zwitterionic"]
+
+    # Conservative SMILES motifs
+    has_carboxylic_acid_like = bool(re.search(r'C\(=O\)O', smiles))
+    has_sulfonic_acid_like = "S(=O)(=O)O" in smiles
+    has_phosphonic_like = "P(=O)(O)O" in smiles
+
+    has_basic_heterocycle = any(k in hints for k in ["pyridine", "imidazole", "piperidine", "piperazine", "morpholine"])
+    has_amine_hint = any(k in hints for k in basic_keywords)
+
+    # Do not treat all nitrogen-containing molecules as basic.
+    # Use only a low-confidence heuristic for obvious amines when hints are absent.
+    has_possible_amine = (
+        ("N" in smiles)
+        and not any(x in smiles for x in ["[N+](=O)", "N(=O)", "C(=O)N", "S(=O)(=O)N", "N=C=O"])
+    )
+
+    if has_carboxylic_acid_like or has_sulfonic_acid_like or has_phosphonic_like or any(k in hints for k in acidic_keywords):
         flags["acidic"] = True
-        
-    # 'N' not adjacent to C=O (very basic heuristic), or explicit keywords
-    if ("N" in smiles and "C(=O)N" not in smiles) or \
-       any(kw in hints for kw in ["amine", "guanidinium", "biguanide", "piperidine", "piperazine", "pyrrolidine", "pyridine", "imidazole"]):
+
+    if has_basic_heterocycle or has_amine_hint or has_possible_amine:
         flags["basic"] = True
-        
-    if any(kw in hints for kw in ["amino acid", "peptide", "betaine"]):
+
+    if any(k in hints for k in amphoteric_keywords):
         flags["acidic"] = True
         flags["basic"] = True
 
     if flags["acidic"] and flags["basic"]:
         flags["amphoteric"] = True
-        flags["ionization_warning"] = "Retention and peak shape will be highly pH-dependent due to amphoteric/zwitterionic ionizable groups. Predicted column choice and logP-based retention are less reliable without knowing actual pKa values. Experimental pKa scouting is required before finalizing mobile-phase pH."
+        flags["ionization_warning"] = (
+            "Retention and peak shape will be highly pH-dependent due to amphoteric/zwitterionic ionizable groups. "
+            "Predicted column choice and logP-based retention are less reliable without actual pKa values. "
+            "Experimental pH scouting is required before finalizing mobile-phase pH."
+        )
     elif flags["acidic"]:
-        flags["ionization_warning"] = "Retention and peak shape will be highly pH-dependent due to acidic ionizable groups. Predicted column choice and logP-based retention are less reliable without knowing actual pKa values. Experimental pKa scouting is required before finalizing mobile-phase pH."
+        flags["ionization_warning"] = (
+            "Retention and peak shape will be highly pH-dependent due to acidic ionizable groups. "
+            "Predicted column choice and logP-based retention are less reliable without actual pKa values. "
+            "Experimental pH scouting is required before finalizing mobile-phase pH."
+        )
     elif flags["basic"]:
-        flags["ionization_warning"] = "Retention and peak shape will be highly pH-dependent due to basic ionizable groups. Predicted column choice and logP-based retention are less reliable without knowing actual pKa values. Experimental pKa scouting is required before finalizing mobile-phase pH."
-    else:
-        flags["ionization_warning"] = None
+        flags["ionization_warning"] = (
+            "Retention and peak shape will be highly pH-dependent due to basic ionizable groups. "
+            "Predicted column choice and logP-based retention are less reliable without actual pKa values. "
+            "Experimental pH scouting is required before finalizing mobile-phase pH."
+        )
 
-    # 2. Chemical Stability Flags
-    if "C(=O)O" in smiles and "C(=O)OH" not in smiles:
-        flags["hydrolysis_risk"].append("ester")
-    if any(kw in hints for kw in ["ester", "lactam", "acetal", "ketal", "imine", "schiff"]):
+    # -------------------------
+    # 2. Stability heuristics
+    # -------------------------
+    # Ester-like: conservative; user hints can strengthen this
+    ester_like = ("C(=O)O" in smiles) and not any(k in hints for k in ["carboxylic acid", "benzoic acid", "acetic acid"])
+    if ester_like or any(k in hints for k in ["ester", "lactam", "beta-lactam", "acetal", "ketal", "imine", "schiff"]):
         flags["hydrolysis_risk"].append("hydrolyzable group")
-        
-    if "C=O" in smiles and "C(=O)H" in smiles:
+
+    if any(k in hints for k in ["aldehyde"]):
         flags["oxidation_risk"].append("aldehyde")
-    if "c1ccc(O)cc1" in smiles or "phenol" in hints:
+    if "phenol" in hints:
         flags["oxidation_risk"].append("phenol")
-    if "S" in smiles or any(kw in hints for kw in ["thiol", "disulfide", "sulfide"]):
-        flags["oxidation_risk"].append("thiol/sulfur")
-        
-    stability_warnings = []
+    if any(k in hints for k in ["thiol", "disulfide", "sulfide"]) or "S" in formula:
+        flags["oxidation_risk"].append("sulfur-containing group")
+
     if flags["hydrolysis_risk"]:
-        stability_warnings.append(f"Contains {', '.join(set(flags['hydrolysis_risk']))} functionality; verify solution stability over the planned pH range and autosampler time (hydrolysis can bias assay results).")
+        flags["stability_warnings"].append(
+            "Contains potentially hydrolyzable functionality; verify solution stability over the planned pH range and autosampler residence time."
+        )
     if flags["oxidation_risk"]:
-        stability_warnings.append(f"Contains {', '.join(set(flags['oxidation_risk']))} functionality; possible oxidation. Recommend minimizing oxygen/light exposure or adding antioxidants where appropriate.")
+        flags["stability_warnings"].append(
+            "Contains potentially oxidation-sensitive functionality; minimize oxygen/light exposure and verify solution stability experimentally."
+        )
 
-    flags["stability_warnings"] = stability_warnings
-
-    # 3. Solubility & Diluent Compatibility
+    # -------------------------
+    # 3. Solubility heuristics
+    # -------------------------
     if logp_val is not None:
-        if logp_val < 0 and tpsa_val and tpsa_val > 60:
-            flags["solubility_statement"] = "Analyte is very polar (logP < 0, high TPSA). Likely good water/buffer solubility; may have limited solubility in high organic solvents."
+        if logp_val < 0 and tpsa_val is not None and tpsa_val > 60:
+            flags["solubility_statement"] = (
+                "Analyte appears very polar. It may have good water/buffer solubility but limited solubility in high organic content."
+            )
         elif logp_val > 4:
-            flags["solubility_statement"] = "Analyte is very hydrophobic (logP > 4). Likely limited water solubility, better in organic solvents (ACN/MeOH)."
+            flags["solubility_statement"] = (
+                "Analyte appears very hydrophobic. It may have limited water solubility and may dissolve better in organic-rich diluents."
+            )
         else:
-            flags["solubility_statement"] = "Analyte has moderate lipophilicity. Confirm solubility experimentally in both aqueous buffers and organics."
+            flags["solubility_statement"] = (
+                "Analyte appears moderately lipophilic. Confirm solubility experimentally in both aqueous and organic-compatible diluents."
+            )
     else:
-        flags["solubility_statement"] = "Solubility expectations cannot be inferred without logP/TPSA."
+        flags["solubility_statement"] = "Solubility cannot be estimated reliably because logP/TPSA are unavailable."
 
     flags["solubility_warning"] = (
-        "Ensure the analyte is fully soluble in the chosen diluent and in the starting mobile phase; "
-        "precipitation or phase separation will invalidate the method. "
-        "For RP-HPLC, the injection solvent should not be significantly stronger than the starting mobile phase "
-        "(e.g., injecting in 100% ACN onto a 5% organic starting condition can cause fronting/distorted peaks). "
-        "Encourage matching or slightly weaker organic content in the diluent."
+        "Ensure the analyte is fully soluble in the chosen diluent and at the initial mobile-phase composition. "
+        "For reversed-phase methods, avoid injecting from a substantially stronger solvent than the starting mobile phase because this can distort peaks."
     )
+
+    # -------------------------
+    # 4. Salt / hydrate heuristics
+    # -------------------------
+    formula_upper = formula.upper()
+    if " CL" in f" {formula_upper}" or "CL" in formula_upper:
+        flags["salt_flags"].append("Possible chloride / hydrochloride form")
+    if any(metal in formula_upper for metal in ["NA", "K", "CA", "MG"]):
+        flags["salt_flags"].append("Possible metal salt form")
+    if any(k in hints for k in ["hydrochloride", "sodium salt", "potassium salt", "maleate", "mesylate", "tosylate"]):
+        flags["salt_flags"].append("Named salt form detected from user hints")
+    if any(k in hints for k in ["hydrate", "monohydrate", "dihydrate", "solvate"]):
+        flags["hydrate_flag"] = "Possible hydrate/solvate form detected from user hints"
 
     return flags
 
