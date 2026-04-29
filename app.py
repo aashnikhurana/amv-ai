@@ -112,11 +112,11 @@ st.progress(st.session_state.stage / 8)
 st.caption(f"Stage {st.session_state.stage} of 8")
 
 st.markdown("""
-<div style="background-color:#FFF3CD; border:1px solid #FFC107; border-radius:6px; 
-padding:0.6rem 1rem; margin-bottom:0.5rem; font-size:0.85rem; color:#856404;">
-⚠️ <b>Research & Guidance Tool Only.</b> AMV-AI is not a validated analytical system. 
-All outputs must be reviewed by a qualified analytical chemist. Not suitable for 
-direct regulatory submission without independent experimental verification.
+<div style="background-color:#F8F9FA; border:1px solid #DEE2E6; border-radius:6px; 
+padding:0.6rem 1rem; margin-bottom:1rem; font-size:0.85rem; color:#495057;">
+    ℹ️ <b>Disclaimer:</b> AMV-AI provides structure-based method scouting guidance. 
+    It does not replace experimental method development or formal validation, 
+    and outputs should not be used as regulatory evidence without appropriate laboratory verification.
 </div>
 """, unsafe_allow_html=True)
 
