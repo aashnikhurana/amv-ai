@@ -268,4 +268,30 @@ VALIDATION_SST_RULES = {
             "Confirm that system suitability and key performance metrics remain within acceptable limits under these variations.",
         ],
     },
+    "dissolution": {
+        "description": "Dissolution-specific checks",
+        "items": [
+            "Confirm filtration does not adsorb analyte.",
+            "Verify solution stability in dissolution medium over the full test window.",
+            "Demonstrate acceptable precision at the target sampling time points.",
+            "Confirm the method is suitable for the dissolution medium composition and pH."
+        ],
+    },
+    "identification": {
+        "description": "Identification-focused checks",
+        "items": [
+            "Confirm analyte identity by retention time match to a reference standard.",
+            "Use PDA or spectral confirmation when available.",
+            "Demonstrate specificity against excipients or matrix peaks."
+        ],
+    },
+    "content_uniformity": {
+        "description": "Content uniformity checks",
+        "items": [
+            "Prepare individual dosage units separately; do not pool samples.",
+            "Demonstrate consistent extraction efficiency across units.",
+            "Verify method precision is appropriate for unit-to-unit comparison.",
+            "Ensure assay calculations use the correct analyte form (salt / hydrate / free base)."
+        ],
+    },
 }

@@ -900,6 +900,15 @@ elif st.session_state.stage == 2:
     )
 
     if st.button("🔍 Fetch Properties"):
+        st.session_state.properties = None
+        st.session_state.features = None
+        st.session_state.chem_flags = None
+        st.session_state.identity_confirmed = False
+        st.session_state.mobile_phase_hint = None
+        st.session_state.elution_mode_hint = None
+        st.session_state.temperature_hint = None
+        st.session_state.guard_column_hint = None
+
         if not compound_name.strip():
             st.warning("Please enter a compound name.")
         else:
@@ -909,7 +918,7 @@ elif st.session_state.stage == 2:
                 st.session_state.compound = compound_name.strip()
                 st.session_state.properties = props
             else:
-                st.error("❌ Not found in PubChem. Check spelling or try the chemical name.")
+                st.error("❌ Not found in PubChem. Check spelling or try a more specific chemical name.")
 
     if st.session_state.properties:
         p = st.session_state.properties
@@ -942,7 +951,7 @@ elif st.session_state.stage == 2:
         with col2:
             st.metric("LogP", p['logp'])
         with col3:
-            st.metric("TPSA", f"{p['tpsa']} Ų")
+            st.metric("TPSA", f"{p['tpsa']} Å²")
 
 
         st.warning("⚠️ LogP shown is calculated (XLogP3). For ionizable compounds and salt forms, experimental LogP may differ significantly. Verify against literature before finalizing mobile phase organic content.")
@@ -991,27 +1000,55 @@ elif st.session_state.stage == 2:
 
         st.markdown("### What this means for your method")
 
-        uv_result, features = interpret_uv(smiles, p.get('formula', ''), extra_hints)
+        uv_result, features, uv_meta = interpret_uv(smiles, p.get('formula', ''), extra_hints)
         chem_flags = assess_additional_properties(smiles, p.get('formula', ''), extra_hints, p.get('logp'), p.get('tpsa'))
-        
-        st.session_state.features = features  # Save for downstream stages
-        
+
+        st.session_state.features = features
+        st.session_state.chem_flags = chem_flags
+
+        st.markdown(f"""
+        <div class="prop-card">
+            <b>🔬 Formula:</b> {p['formula']}<br>
+            <b>📋 IUPAC Name:</b> {p['iupac']}<br>
+            <b>🧬 SMILES:</b> {smiles}
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.session_state.identity_confirmed = st.checkbox(
+            "I confirm that the PubChem match above corresponds to my actual analyte and form (correct isomer, salt form, and hydrate/solvate state).",
+            value=st.session_state.identity_confirmed
+        )
+
+        if not st.session_state.identity_confirmed:
+            st.warning("Please confirm the compound identity before relying on Stage 2 recommendations.")
+            st.stop()
+
         col_headline, col_explanation = recommend_column(
             logp=p.get('logp'),
             tpsa=p.get('tpsa'),
             mw=p.get('mw'),
             features=features,
             method_type=st.session_state.method_type,
-            matrix=extra_hints # Proxy for matrix until stage 3
+            matrix=st.session_state.get("matrix") or extra_hints
         )
 
+        ph_headline, ph_explanation = recommend_mobile_phase_ph(chem_flags, st.session_state.method_type)
+        elution_headline, elution_explanation = recommend_elution_mode(p.get('logp'), st.session_state.method_type, chem_flags)
+        temp_headline, temp_explanation = recommend_temperature(chem_flags, st.session_state.method_type)
+        guard_hint = recommend_guard_column(st.session_state.get("matrix") or extra_hints, st.session_state.method_type)
+
+        st.session_state.mobile_phase_hint = (ph_headline, ph_explanation)
+        st.session_state.elution_mode_hint = (elution_headline, elution_explanation)
+        st.session_state.temperature_hint = (temp_headline, temp_explanation)
+        st.session_state.guard_column_hint = guard_hint
+
         warnings = collect_warnings(
-            matrix=extra_hints,
+            matrix=st.session_state.get("matrix") or extra_hints,
             method_type=st.session_state.method_type,
             features=features,
             column_type=col_headline,
             logp=p.get('logp'),
-            uv_html=uv_result,
+            uv_meta=uv_meta,
             chem_flags=chem_flags
         )
 
@@ -1026,6 +1063,25 @@ elif st.session_state.stage == 2:
         <div class="prop-card">
             <b>💡 Detection wavelength:</b><br>
             {uv_result}
+        </div>
+        <div class="prop-card">
+            <b>🧴 Mobile-phase pH starting point:</b><br>
+            <b>{ph_headline}</b><br>
+            {ph_explanation}
+        </div>
+        <div class="prop-card">
+            <b>📈 Elution mode:</b><br>
+            <b>{elution_headline}</b><br>
+            {elution_explanation}
+        </div>
+        <div class="prop-card">
+            <b>🌡️ Column temperature:</b><br>
+            <b>{temp_headline}</b><br>
+            {temp_explanation}
+        </div>
+        <div class="prop-card">
+            <b>🛡️ Guard column:</b><br>
+            {guard_hint}
         </div>
         <div class="prop-card">
             <b>🔬 Formula:</b> {p['formula']}<br>
@@ -1100,6 +1156,11 @@ elif st.session_state.stage == 3:
         st.markdown("#### ⚠️ Matrix Warnings:")
         for w in prep_info['warnings']:
             st.warning(w)
+
+    if st.session_state.get("properties"):
+        st.info(
+            "ℹ️ Matrix selection can change cleanup strategy and may affect earlier scouting choices such as column protection, wash strength, and practicality of the initial method setup."
+        )
 
     st.divider()
     col1, col2 = st.columns([1, 4])
