@@ -835,9 +835,14 @@ if st.session_state.stage == 0:
 
     if st.button("Continue →"):
         if q == "No — instrument has not been qualified":
-            st.error("❌ Qualification required. No regulatory body will accept data from an unqualified instrument.")
+            st.error("❌ Qualification required. Data from an unqualified instrument may not be acceptable for regulated work.")
         elif q == "I don't know what instrument qualification is":
-            st.info("📚 Instrument qualification is a four-step process (DQ, IQ, OQ, PQ) that proves your HPLC works correctly. Complete this with your instrument vendor before continuing.")
+            st.info("📚 Instrument qualification is a four-step process (DQ, IQ, OQ, PQ) used to demonstrate the HPLC is installed and performing correctly.")
+        elif q == "Partially — some phases done, some not":
+            st.warning("⚠️ Partial qualification carries compliance risk. Ensure missing phases are documented and risk-assessed before using data for GMP or formal validation.")
+            st.session_state.qualification = q
+            go_next()
+            st.rerun()
         else:
             st.session_state.qualification = q
             go_next()
@@ -848,26 +853,36 @@ if st.session_state.stage == 0:
 # STAGE 1
 elif st.session_state.stage == 1:
     st.subheader("Stage 1 — Method Type")
-    st.write("What are you trying to do with this method?")
+    st.write("Choose the analytical purpose. This changes which priorities and warnings are emphasized later.")
 
     for opt in METHOD_OPTIONS:
         is_selected = st.session_state.get("method_type") == opt["key"]
         border = "2px solid #0A1931" if is_selected else "1px solid #B3CFE5"
-        if st.button(f"{opt['icon']} **{opt['label']}**", key=f"btn_{opt['key']}"):
+        bg = "#EAF3F9" if is_selected else "transparent"
+
+        if st.button(f"{opt['icon']} {opt['label']}", key=f"btn_{opt['key']}"):
             st.session_state.method_type = opt["key"]
-            go_next()
-            st.rerun()
+
         st.markdown(f"""
-        <div class="method-card" style="border:{border};">
-            <small>{opt['description']}</small><br>
+        <div class="method-card" style="border:{border}; background:{bg};">
+            <small><b>{opt['description']}</b></small><br>
             <small>→ {opt['impact']}</small>
         </div>
         """, unsafe_allow_html=True)
 
     st.divider()
-    if st.button("← Back"):
-        go_back()
-        st.rerun()
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        if st.button("← Back"):
+            go_back()
+            st.rerun()
+    with col2:
+        if st.button("Continue →"):
+            if not st.session_state.method_type:
+                st.warning("Please select a method type before continuing.")
+            else:
+                go_next()
+                st.rerun()
 
 # STAGE 2
 elif st.session_state.stage == 2:
