@@ -93,7 +93,15 @@ for key, default in {
     "qualification": None,
     "method_type": None,
     "compound": None,
-    "properties": None
+    "properties": None,
+    "features": None,
+    "chem_flags": None,
+    "matrix": None,
+    "identity_confirmed": False,
+    "mobile_phase_hint": None,
+    "elution_mode_hint": None,
+    "temperature_hint": None,
+    "guard_column_hint": None,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
