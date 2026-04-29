@@ -646,51 +646,64 @@ def recommend_validation_checks(method_type):
     """
     Returns relevant validation and SST checks based on method type.
     """
-    method_type = (method_type or "").lower()
-    checks = [VALIDATION_SST_RULES["usp_621"]]
-    
-    if "stability" in method_type or "impurity" in method_type:
+    method_type_l = (method_type or "").lower()
+    checks = [VALIDATION_SST_RULES["usp_621"], VALIDATION_SST_RULES["robustness"]]
+
+    if "stability" in method_type_l or "impurity" in method_type_l:
         checks.append(VALIDATION_SST_RULES["stability_indicating"])
-    
-    if "bioanalytical" in method_type:
+
+    if "bioanalytical" in method_type_l:
         checks.append(VALIDATION_SST_RULES["bioanalytical"])
-        
-    checks.append(VALIDATION_SST_RULES["robustness"])
+
+    if "dissolution" in method_type_l and "dissolution" in VALIDATION_SST_RULES:
+        checks.append(VALIDATION_SST_RULES["dissolution"])
+
+    if "identification" in method_type_l and "identification" in VALIDATION_SST_RULES:
+        checks.append(VALIDATION_SST_RULES["identification"])
+
+    if "content uniformity" in method_type_l and "content_uniformity" in VALIDATION_SST_RULES:
+        checks.append(VALIDATION_SST_RULES["content_uniformity"])
+
     return checks
 
-def collect_warnings(matrix, method_type, features, column_type, logp, uv_html, chem_flags):
-    """
-    Aggregates warnings across all domains.
-    """
+def collect_warnings(matrix, method_type, features, column_type, logp, uv_meta, chem_flags):
     warnings = []
-    
-    # Sample Prep / Matrix Warnings
-    matrix = (matrix or "").lower()
-    if any(m in matrix for m in ["plasma", "serum", "tissue"]) and "Do not inject un-centrifuged" not in str(warnings):
-        warnings.append("Do not inject un-centrifuged biological samples.")
-        
-    # Column/Polarity Warnings
-    try: logp_val = float(logp)
-    except: logp_val = None
-    
+    matrix_l = (matrix or "").lower()
+    method_type_l = (method_type or "").lower()
+
+    try:
+        logp_val = float(logp)
+    except:
+        logp_val = None
+
+    if any(m in matrix_l for m in ["plasma", "serum", "tissue", "blood"]):
+        warnings.append("Do not inject unclarified biological samples directly; protein removal and clarification are required before HPLC injection.")
+
     if logp_val is not None and logp_val < 0 and "C18" in column_type:
-        warnings.append("Polar analyte on standard C18 – risk of k' < 1 and co-elution with void volume.")
-        
-    if any(m in matrix for m in ["oil", "lipid", "fat"]) and "C18" in column_type:
-        warnings.append("Lipid matrix on C18 column – very high risk of irreversible fouling.")
-        
-    # LC-MS
-    if "ms" in method_type.lower() or "bioanalytical" in method_type.lower() or "weak" in uv_html.lower():
-        warnings.append("If using LC-MS detection: non-volatile buffers (phosphate, sulfate) are unsuitable; use volatile buffers (e.g. ammonium formate/acetate).")
-        
-    # Chemistry flags
-    if chem_flags and chem_flags.get("ionization_warning"):
+        warnings.append("Very polar analyte on standard C18 may show poor retention and possible co-elution near the void volume.")
+
+    if any(m in matrix_l for m in ["oil", "lipid", "fat"]) and "C18" in column_type:
+        warnings.append("Lipid-rich matrices can foul reversed-phase columns; strong cleanup and column protection are important.")
+
+    if uv_meta.get("deep_uv"):
+        warnings.append("Deep-UV detection can be limited by solvent and buffer background; confirm baseline quality experimentally.")
+
+    if "bioanalytical" in method_type_l or features.get("weak_uv"):
+        warnings.append("If LC-MS is used, avoid non-volatile buffers such as phosphate; volatile salts are generally preferred.")
+
+    if chem_flags.get("ionization_warning"):
         warnings.append("⚛️ " + chem_flags["ionization_warning"])
-    if chem_flags and chem_flags.get("stability_warnings"):
-        for w in chem_flags["stability_warnings"]:
-            warnings.append("🧪 " + w)
-        
-    return warnings
+
+    for w in chem_flags.get("stability_warnings", []):
+        warnings.append("🧪 " + w)
+
+    for s in chem_flags.get("salt_flags", []):
+        warnings.append("🧂 " + s + ". Confirm whether your material is the same salt form used for MW and assay calculations.")
+
+    if chem_flags.get("hydrate_flag"):
+        warnings.append("💧 " + chem_flags["hydrate_flag"] + ". Confirm hydrate/solvate status because assay calculations and sample preparation may differ.")
+
+    return list(dict.fromkeys(warnings))
 
 METHOD_OPTIONS = [
     {
