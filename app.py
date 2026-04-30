@@ -978,7 +978,7 @@ elif st.session_state.stage == 2:
         if pka_known == "Yes — acidic compound (carboxylic acid, phenol, sulfonamide)":
             pka_data["type"] = "acidic"
             pka_data["acidic"] = st.number_input("Acidic pKa", value=4.0, step=0.1)
-            pka_data["recommendation"] = f"Run mobile phase at pH {pka_data['acidic']-2:.1f} to {pka_data['acidic']-3:.1f}. This ensures the dominant ionization state is the neutral (suppressed) form for reproducible retention."
+            pka_data["recommendation"] = f"Run mobile phase at pH {pka_data['acidic']-2:.1f} to {pka_data['acidic']-3:.1f}. This generally suppresses ionization and often improves reversed-phase retention reproducibility, but the final pH must still be confirmed experimentally."
             st.info(pka_data["recommendation"])
         elif pka_known == "Yes — basic compound (amine, imidazole, pyridine)":
             pka_data["type"] = "basic"
@@ -995,7 +995,7 @@ elif st.session_state.stage == 2:
             pka_data["recommendation"] = "Run between the two pKa values or test both pH extremes. This compound class requires experimental pH scouting."
             st.info(pka_data["recommendation"])
         else:
-            pka_data["recommendation"] = "pH has minimal effect on retention. Use 0.1% formic acid as default."
+            pka_data["recommendation"] = "If the compound is believed to be largely neutral, pH may be less influential than for ionizable analytes. A mildly acidic aqueous phase is a common starting point, but the final choice depends on detector compatibility, stability, and column chemistry."
             st.info(pka_data["recommendation"])
 
         st.caption("Don't know your pKa? Calculate it free at chemicalize.com using your SMILES string.")
@@ -1274,7 +1274,7 @@ MOBILE PHASE pH (based on ionization):
 - Acidic compound (pKa 3–5): Run at pH 2.0–3.0. Use 0.1% formic acid or 10 mM ammonium formate pH 3.
 - Basic compound (pKa 8–10): Run at pH 2.0–3.0 to fully protonate. Low pH suppresses silanol activity.
 - Neutral compound: pH less critical. Use 0.1% formic acid as default.
-- RULE: Always run at least 2 pH units from the pKa.
+- As a common scouting heuristic, consider testing pH conditions sufficiently separated from the relevant pKa when appropriate, but adjust based on analyte stability, column pH limits, and the separation goal.
 
 ISOCRATIC vs GRADIENT:
 - Single analyte, LogP 1–3: Try isocratic first at estimated organic %
