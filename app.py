@@ -1264,16 +1264,16 @@ Your job is to generate a practical, immediately actionable HPLC method scouting
 DECISION RULES YOU APPLY:
 
 COLUMN SELECTION (based on LogP):
-- LogP < 0: HILIC primary. Compound too polar for standard RP.
+- For very polar analytes, HILIC or other retention-enhancing approaches may be worth scouting because standard RP retention can be limited.
 - LogP 0–1: C8 or mixed-mode. Limited RP retention expected.
-- LogP 1–4: C18 primary (e.g. Waters XBridge C18, Phenomenex Luna C18, Agilent Zorbax Eclipse Plus C18). This is the ideal RP range.
+- C18 is often a practical first-choice RP column in this range, but selectivity should still be confirmed experimentally.
 - LogP 4–5: C18 with high organic start, or phenyl-hexyl for aromatic compounds.
 - LogP > 5: C4/C8 preferred. C18 risks excessive retention.
 
 MOBILE PHASE pH (based on ionization):
 - Acidic compound (pKa 3–5): Run at pH 2.0–3.0. Use 0.1% formic acid or 10 mM ammonium formate pH 3.
 - Basic compound (pKa 8–10): Run at pH 2.0–3.0 to fully protonate. Low pH suppresses silanol activity.
-- Neutral compound: pH less critical. Use 0.1% formic acid as default.
+- For analytes believed to be largely neutral, pH may be less critical than for ionizable compounds; a mildly acidic aqueous phase is one common starting point.
 - As a common scouting heuristic, consider testing pH conditions sufficiently separated from the relevant pKa when appropriate, but adjust based on analyte stability, column pH limits, and the separation goal.
 
 ISOCRATIC vs GRADIENT:
