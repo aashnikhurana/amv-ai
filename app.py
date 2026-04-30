@@ -7,14 +7,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-st.set_page_config(page_title="AMV-AI", page_icon="🔬", layout="centered")
+st.set_page_config(page_title="Analytical Method Lifecycle Tool", page_icon="🔬", layout="centered")
 
 st.markdown("""
 <style>
     .stApp { background-color: #F6FAFD; }
     .stApp, .stMarkdown, p, label { color: #1A3D63 !important; }
-    h1, h2, h3 { color: #0A1931 !important; }
-    h1 { font-size: 2.2rem !important; }
+    h1, h2, h3 { 
+        color: #0A1931 !important; 
+        text-align: center !important; 
+    }
     .stButton > button, .stDownloadButton > button {
         background-color: #B3CFE5 !important;
         color: #1A3D63 !important;
@@ -40,16 +42,20 @@ st.markdown("""
     [data-testid="stMetricValue"] { 
         color: #0A1931 !important; 
         font-weight: 700 !important; 
-        justify-content: center;
+        text-align: center !important;
     }
     [data-testid="stMetricLabel"] { 
         color: #1A3D63 !important; 
-        justify-content: center;
+        text-align: center !important;
     }
     [data-testid="stMetric"] {
         display: flex;
         flex-direction: column;
         align-items: center;
+    }
+    .stCaption { 
+        text-align: center !important; 
+        display: block !important;
     }
     
     .stage-card, .prop-card, .method-card {
@@ -123,7 +129,7 @@ for key, default in {
     if key not in st.session_state:
         st.session_state[key] = default
 
-st.title("🔬 AMV-AI")
+st.title("🔬 Analytical Method Lifecycle Tool")
 st.caption("Analytical Method Lifecycle Tool")
 st.progress(st.session_state.stage / 8)
 st.caption(f"Stage {st.session_state.stage} of 8")
@@ -131,7 +137,7 @@ st.caption(f"Stage {st.session_state.stage} of 8")
 st.markdown("""
 <div style="background-color:#F8F9FA; border:1px solid #DEE2E6; border-radius:6px; 
 padding:0.6rem 1rem; margin-bottom:1rem; font-size:0.85rem; color:#495057;">
-    ℹ️ <b>Disclaimer:</b> AMV-AI provides structure-based method scouting guidance. 
+    ℹ️ <b>Disclaimer:</b> This tool provides structure-based method scouting guidance. 
     It does not replace experimental method development or formal validation, 
     and outputs should not be used as regulatory evidence without appropriate laboratory verification.
 </div>
@@ -1080,14 +1086,14 @@ elif st.session_state.stage == 2:
         </div>
         """, unsafe_allow_html=True)
 
+        st.markdown('<div style="background-color: #EBF5FB; padding: 1.2rem; border-radius: 10px; border: 1px solid #AED6F1; margin: 1.5rem 0;">', unsafe_allow_html=True)
         st.session_state.identity_confirmed = st.checkbox(
-            "I confirm that the PubChem match above corresponds to my actual analyte and form (correct isomer, salt form, and hydrate/solvate state).",
+            "**I confirm that the PubChem match above corresponds to my actual analyte and form (correct isomer, salt form, and hydrate/solvate state).**",
             value=st.session_state.identity_confirmed
         )
-
         if not st.session_state.identity_confirmed:
-            st.warning("Please confirm the compound identity before relying on Stage 2 recommendations.")
-            st.stop()
+            st.markdown('<small style="color: #CB4335;">⚠️ Confirmation required to unlock method recommendations.</small>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
         col_headline, col_explanation = recommend_column(
             logp=p.get('logp'),
@@ -1189,6 +1195,8 @@ elif st.session_state.stage == 2:
         if st.button("Continue →"):
             if not st.session_state.properties:
                 st.warning("Please fetch compound properties before continuing.")
+            elif not st.session_state.identity_confirmed:
+                st.error("Please confirm the compound identity (checkbox above) before continuing.")
             else:
                 go_next()
                 st.rerun()
@@ -1405,11 +1413,9 @@ PRIOR KNOWLEDGE:
 
 Generate the complete scouting plan now."""
 
-            with st.spinner("Connecting to NVIDIA Mistral..."):
+            with st.spinner("Generating..."):
                 try:
-                    st.markdown('<div class="streaming-box">', unsafe_allow_html=True)
                     scouting_plan = st.write_stream(call_llm(SCOUTING_SYSTEM_PROMPT, user_message, api_key))
-                    st.markdown('</div>', unsafe_allow_html=True)
                     st.session_state.scouting_plan = scouting_plan
                 except Exception as e:
                     st.error(f"NVIDIA API error: {str(e)}")
@@ -1605,11 +1611,9 @@ ROBUSTNESS RESULTS:
 
 Assess each parameter and provide the complete robustness report."""
 
-            with st.spinner("Analyzing robustness..."):
+            with st.spinner("Generating..."):
                 try:
-                    st.markdown('<div class="streaming-box">', unsafe_allow_html=True)
                     robustness_report = st.write_stream(call_llm(ROBUSTNESS_PROMPT, user_msg, api_key))
-                    st.markdown('</div>', unsafe_allow_html=True)
                     st.session_state.robustness_report = robustness_report
                 except Exception as e:
                     st.error(f"NVIDIA API error: {str(e)}")
@@ -1908,11 +1912,9 @@ Solution Stability:
 - % change at 48h: {stab_48}%
 """
 
-        with st.spinner("Assessing validation data..."):
+        with st.spinner("Generating..."):
             try:
-                st.markdown('<div class="streaming-box">', unsafe_allow_html=True)
                 validation_report = st.write_stream(call_llm(VALIDATION_PROMPT, validation_data, api_key))
-                st.markdown('</div>', unsafe_allow_html=True)
                 st.session_state.validation_report = validation_report
             except Exception as e:
                 st.error(f"NVIDIA API error: {str(e)}")
