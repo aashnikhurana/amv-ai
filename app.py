@@ -1417,7 +1417,7 @@ Generate the complete scouting plan now."""
     if st.session_state.get("scouting_plan"):
         st.divider()
         st.markdown("### Your Scouting Plan")
-        st.markdown(st.session_state.scouting_plan)
+        st.markdown(f'<div class="streaming-box">{st.session_state.scouting_plan}</div>', unsafe_allow_html=True)
 
         st.divider()
         st.download_button(
@@ -1617,7 +1617,7 @@ Assess each parameter and provide the complete robustness report."""
     if st.session_state.get("robustness_report"):
         st.divider()
         st.markdown("### Robustness Assessment")
-        st.markdown(st.session_state.robustness_report)
+        st.markdown(f'<div class="streaming-box">{st.session_state.robustness_report}</div>', unsafe_allow_html=True)
         st.download_button(
             label="📄 Download Robustness Report",
             data=st.session_state.robustness_report,
@@ -1920,7 +1920,7 @@ Solution Stability:
     if st.session_state.get("validation_report"):
         st.divider()
         st.markdown("### Validation Assessment Report")
-        st.markdown(st.session_state.validation_report)
+        st.markdown(f'<div class="streaming-box">{st.session_state.validation_report}</div>', unsafe_allow_html=True)
 
         st.divider()
         st.success("🎉 Validation assessment complete. Download your report below.")
