@@ -1,6 +1,9 @@
-import streamlit as st
 import requests
 import numpy as np
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 st.set_page_config(page_title="AMV-AI", page_icon="🔬", layout="centered")
 
@@ -669,6 +672,37 @@ def recommend_validation_checks(method_type):
 
     return checks
 
+def call_llm(system_prompt, user_message, api_key):
+    """
+    Calls the NVIDIA Mistral API (OpenAI-compatible format).
+    """
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Accept": "application/json"
+    }
+    
+    payload = {
+        "model": "mistralai/mistral-medium-3.5-128b",
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message}
+        ],
+        "max_tokens": 8000,
+        "temperature": 0.3,
+        "stream": False
+    }
+    
+    response = requests.post(
+        "https://integrate.api.nvidia.com/v1/chat/completions",
+        headers=headers,
+        json=payload
+    )
+    
+    if response.status_code != 200:
+        raise Exception(f"NVIDIA API error: {response.text}")
+        
+    return response.json()["choices"][0]["message"]["content"]
+
 def collect_warnings(matrix, method_type, features, column_type, logp, uv_meta, chem_flags):
     warnings = []
     matrix_l = (matrix or "").lower()
@@ -1187,11 +1221,6 @@ elif st.session_state.stage == 3:
 
 # STAGE 4 - METHOD SCOUTING
 elif st.session_state.stage == 4:
-    import anthropic
-    import os
-    from dotenv import load_dotenv
-    load_dotenv()
-
     st.subheader("Stage 4 — Method Scouting")
     st.write("Based on your compound properties, we will now generate a complete scouting plan.")
 
@@ -1253,9 +1282,9 @@ elif st.session_state.stage == 4:
 
     if st.button("🧠 Generate Scouting Plan"):
 
-        api_key = os.getenv("ANTHROPIC_API_KEY")
+        api_key = os.getenv("NVIDIA_API_KEY")
         if not api_key:
-            st.error("API key not found. Check your .env file.")
+            st.error("NVIDIA API key not found. Check your .env file.")
         else:
             SCOUTING_SYSTEM_PROMPT = """You are a senior analytical chemist with 20+ years of HPLC method development experience in pharmaceutical laboratories. You specialize in ICH Q2(R2) compliant methods.
 
@@ -1349,17 +1378,10 @@ Generate the complete scouting plan now."""
 
             with st.spinner("We are generating your scouting plan... (this takes 15–30 seconds)"):
                 try:
-                    client = anthropic.Anthropic(api_key=api_key)
-                    message = client.messages.create(
-                        model="claude-sonnet-4-6",
-                        max_tokens=9000,
-                        system=SCOUTING_SYSTEM_PROMPT,
-                        messages=[{"role": "user", "content": user_message}]
-                    )
-                    scouting_plan = message.content[0].text
+                    scouting_plan = call_llm(SCOUTING_SYSTEM_PROMPT, user_message, api_key)
                     st.session_state.scouting_plan = scouting_plan
                 except Exception as e:
-                    st.error(f"Claude API error: {str(e)}")
+                    st.error(f"NVIDIA API error: {str(e)}")
 
     if st.session_state.get("scouting_plan"):
         st.divider()
@@ -1426,11 +1448,6 @@ Generate the complete scouting plan now."""
 
 # STAGE 5 - ROBUSTNESS TESTING
 elif st.session_state.stage == 5:
-    import anthropic
-    import os
-    from dotenv import load_dotenv
-    load_dotenv()
-
     st.subheader("Stage 5 — Robustness Testing")
     st.write("Test how sensitive your method is to small deliberate changes in conditions.")
     st.info("Vary one parameter at a time. Run 3 replicates at each condition. Enter the results below.")
@@ -1507,7 +1524,7 @@ elif st.session_state.stage == 5:
         if not results:
             st.warning("Please enter at least one robustness result before assessing.")
         else:
-            api_key = os.getenv("ANTHROPIC_API_KEY")
+            api_key = os.getenv("NVIDIA_API_KEY")
 
             ROBUSTNESS_PROMPT = """You are a senior pharmaceutical analytical chemist assessing HPLC method robustness per ICH Q2(R2) guidelines.
 
@@ -1559,17 +1576,10 @@ Assess each parameter and provide the complete robustness report."""
 
             with st.spinner("We are assessing your robustness data..."):
                 try:
-                    client = anthropic.Anthropic(api_key=api_key)
-                    message = client.messages.create(
-                        model="claude-sonnet-4-6",
-                        max_tokens=4096,
-                        system=ROBUSTNESS_PROMPT,
-                        messages=[{"role": "user", "content": user_msg}]
-                    )
-                    robustness_report = message.content[0].text
+                    robustness_report = call_llm(ROBUSTNESS_PROMPT, user_msg, api_key)
                     st.session_state.robustness_report = robustness_report
                 except Exception as e:
-                    st.error(f"Claude API error: {str(e)}")
+                    st.error(f"NVIDIA API error: {str(e)}")
 
     if st.session_state.get("robustness_report"):
         st.divider()
@@ -1642,11 +1652,6 @@ elif st.session_state.stage == 6:
 
 # STAGE 7 - FORMAL VALIDATION
 elif st.session_state.stage == 7:
-    import anthropic
-    import os
-    from dotenv import load_dotenv
-    load_dotenv()
-
     st.subheader("Stage 7 — Formal Method Validation")
     st.write("Enter your validation data. We will assess each parameter against ICH Q2(R2) acceptance criteria.")
 
@@ -1770,7 +1775,7 @@ elif st.session_state.stage == 7:
     st.divider()
 
     if st.button("✅ Run Full Validation Assessment"):
-        api_key = os.getenv("ANTHROPIC_API_KEY")
+        api_key = os.getenv("NVIDIA_API_KEY")
 
         VALIDATION_PROMPT = """You are a senior pharmaceutical analytical chemist and regulatory affairs specialist.
 
@@ -1872,17 +1877,10 @@ Solution Stability:
 
         with st.spinner("We are assessing your validation data against ICH Q2(R2) criteria..."):
             try:
-                client = anthropic.Anthropic(api_key=api_key)
-                message = client.messages.create(
-                    model="claude-sonnet-4-6",
-                    max_tokens=4096,
-                    system=VALIDATION_PROMPT,
-                    messages=[{"role": "user", "content": validation_data}]
-                )
-                validation_report = message.content[0].text
+                validation_report = call_llm(VALIDATION_PROMPT, validation_data, api_key)
                 st.session_state.validation_report = validation_report
             except Exception as e:
-                st.error(f"Claude API error: {str(e)}")
+                st.error(f"NVIDIA API error: {str(e)}")
 
     if st.session_state.get("validation_report"):
         st.divider()
