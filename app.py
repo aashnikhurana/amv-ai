@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import numpy as np
 import os
+import json
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -58,6 +59,18 @@ st.markdown("""
     .stage-card {
         border: 1px solid #B3CFE5;
         border-left: 4px solid #1A3D63;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        background-color: white;
+    }
+    .streaming-box {
+        background-color: #F0F8FF;
+        border: 1px solid #B0C4DE;
+        border-radius: 8px;
+        padding: 1.5rem;
+        margin: 1rem 0;
+        color: #1A3D63;
+    }
         padding: 1.2rem 1.5rem;
         margin: 1rem 0;
     }
@@ -675,11 +688,12 @@ def recommend_validation_checks(method_type):
 
 def call_llm(system_prompt, user_message, api_key):
     """
-    Calls the NVIDIA Mistral API (OpenAI-compatible format).
+    Calls the NVIDIA Mistral API with streaming support.
+    Yields chunks of text as they arrive.
     """
     headers = {
         "Authorization": f"Bearer {api_key}",
-        "Accept": "application/json"
+        "Accept": "text/event-stream"
     }
     
     payload = {
@@ -690,19 +704,33 @@ def call_llm(system_prompt, user_message, api_key):
         ],
         "max_tokens": 8000,
         "temperature": 0.3,
-        "stream": False
+        "stream": True
     }
     
     response = requests.post(
         "https://integrate.api.nvidia.com/v1/chat/completions",
         headers=headers,
-        json=payload
+        json=payload,
+        stream=True
     )
     
     if response.status_code != 200:
         raise Exception(f"NVIDIA API error: {response.text}")
         
-    return response.json()["choices"][0]["message"]["content"]
+    for line in response.iter_lines():
+        if line:
+            decoded_line = line.decode('utf-8')
+            if decoded_line.startswith('data: '):
+                data_str = decoded_line[6:]
+                if data_str == '[DONE]':
+                    break
+                try:
+                    data = json.loads(data_str)
+                    content = data['choices'][0]['delta'].get('content', '')
+                    if content:
+                        yield content
+                except:
+                    continue
 
 def collect_warnings(matrix, method_type, features, column_type, logp, uv_meta, chem_flags):
     warnings = []
@@ -1377,9 +1405,11 @@ PRIOR KNOWLEDGE:
 
 Generate the complete scouting plan now."""
 
-            with st.spinner("We are generating your scouting plan... (this takes 15–30 seconds)"):
+            with st.spinner("Connecting to NVIDIA Mistral..."):
                 try:
-                    scouting_plan = call_llm(SCOUTING_SYSTEM_PROMPT, user_message, api_key)
+                    st.markdown('<div class="streaming-box">', unsafe_allow_html=True)
+                    scouting_plan = st.write_stream(call_llm(SCOUTING_SYSTEM_PROMPT, user_message, api_key))
+                    st.markdown('</div>', unsafe_allow_html=True)
                     st.session_state.scouting_plan = scouting_plan
                 except Exception as e:
                     st.error(f"NVIDIA API error: {str(e)}")
@@ -1575,9 +1605,11 @@ ROBUSTNESS RESULTS:
 
 Assess each parameter and provide the complete robustness report."""
 
-            with st.spinner("We are assessing your robustness data..."):
+            with st.spinner("Analyzing robustness..."):
                 try:
-                    robustness_report = call_llm(ROBUSTNESS_PROMPT, user_msg, api_key)
+                    st.markdown('<div class="streaming-box">', unsafe_allow_html=True)
+                    robustness_report = st.write_stream(call_llm(ROBUSTNESS_PROMPT, user_msg, api_key))
+                    st.markdown('</div>', unsafe_allow_html=True)
                     st.session_state.robustness_report = robustness_report
                 except Exception as e:
                     st.error(f"NVIDIA API error: {str(e)}")
@@ -1876,9 +1908,11 @@ Solution Stability:
 - % change at 48h: {stab_48}%
 """
 
-        with st.spinner("We are assessing your validation data against ICH Q2(R2) criteria..."):
+        with st.spinner("Assessing validation data..."):
             try:
-                validation_report = call_llm(VALIDATION_PROMPT, validation_data, api_key)
+                st.markdown('<div class="streaming-box">', unsafe_allow_html=True)
+                validation_report = st.write_stream(call_llm(VALIDATION_PROMPT, validation_data, api_key))
+                st.markdown('</div>', unsafe_allow_html=True)
                 st.session_state.validation_report = validation_report
             except Exception as e:
                 st.error(f"NVIDIA API error: {str(e)}")
