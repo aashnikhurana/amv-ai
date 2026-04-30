@@ -363,19 +363,22 @@ def assess_additional_properties(smiles, formula, hints, logp, tpsa):
     if flags["acidic"] and flags["basic"]:
         flags["amphoteric"] = True
         flags["ionization_warning"] = (
-            "Retention and peak shape will be highly pH-dependent due to amphoteric/zwitterionic ionizable groups. "
+            "Analyte may contain ionizable acidic and basic functionality (amphoteric/zwitterionic). "
+            "Retention and peak shape will be highly pH-dependent. "
             "Predicted column choice and logP-based retention are less reliable without actual pKa values. "
             "Experimental pH scouting is required before finalizing mobile-phase pH."
         )
     elif flags["acidic"]:
         flags["ionization_warning"] = (
-            "Retention and peak shape will be highly pH-dependent due to acidic ionizable groups. "
+            "Analyte may contain ionizable acidic functionality. "
+            "Retention and peak shape will be highly pH-dependent. "
             "Predicted column choice and logP-based retention are less reliable without actual pKa values. "
             "Experimental pH scouting is required before finalizing mobile-phase pH."
         )
     elif flags["basic"]:
         flags["ionization_warning"] = (
-            "Retention and peak shape will be highly pH-dependent due to basic ionizable groups. "
+            "Analyte may contain ionizable basic functionality. "
+            "Retention and peak shape will be highly pH-dependent. "
             "Predicted column choice and logP-based retention are less reliable without actual pKa values. "
             "Experimental pH scouting is required before finalizing mobile-phase pH."
         )
@@ -975,12 +978,12 @@ elif st.session_state.stage == 2:
         if pka_known == "Yes — acidic compound (carboxylic acid, phenol, sulfonamide)":
             pka_data["type"] = "acidic"
             pka_data["acidic"] = st.number_input("Acidic pKa", value=4.0, step=0.1)
-            pka_data["recommendation"] = f"Run mobile phase at pH {pka_data['acidic']-2:.1f} to {pka_data['acidic']-3:.1f}. This ensures fully protonated (neutral) form for reproducible retention."
+            pka_data["recommendation"] = f"Run mobile phase at pH {pka_data['acidic']-2:.1f} to {pka_data['acidic']-3:.1f}. This ensures the dominant ionization state is the neutral (suppressed) form for reproducible retention."
             st.info(pka_data["recommendation"])
         elif pka_known == "Yes — basic compound (amine, imidazole, pyridine)":
             pka_data["type"] = "basic"
             pka_data["basic"] = st.number_input("Basic pKa", value=9.0, step=0.1)
-            pka_data["recommendation"] = f"Run mobile phase at pH {pka_data['basic']-2:.1f} or lower. This fully protonates the amine and suppresses silanol interactions."
+            pka_data["recommendation"] = f"Run mobile phase at pH {pka_data['basic']-2:.1f} or lower. This ensures the dominant ionization state is the protonated form, which improves peak shape by suppressing secondary silanol interactions."
             st.info(pka_data["recommendation"])
         elif pka_known == "Yes — amphoteric (has both acidic and basic groups)":
             pka_data["type"] = "amphoteric"
@@ -1033,6 +1036,13 @@ elif st.session_state.stage == 2:
         )
 
         ph_headline, ph_explanation = recommend_mobile_phase_ph(chem_flags, st.session_state.method_type)
+        ph_confidence = "Structure-based estimate"
+
+        if pka_known != "No — compound is neutral (no ionizable groups)":
+            ph_headline = f"pH scouted from manual pKa: {pka_known.split('—')[1].split('(')[0].strip()}"
+            ph_explanation = pka_data["recommendation"]
+            ph_confidence = "User-confirmed via pKa input"
+
         elution_headline, elution_explanation = recommend_elution_mode(p.get('logp'), st.session_state.method_type, chem_flags)
         temp_headline, temp_explanation = recommend_temperature(chem_flags, st.session_state.method_type)
         guard_hint = recommend_guard_column(st.session_state.get("matrix") or extra_hints, st.session_state.method_type)
@@ -1066,6 +1076,7 @@ elif st.session_state.stage == 2:
         </div>
         <div class="prop-card">
             <b>🧴 Mobile-phase pH starting point:</b><br>
+            <small style="color:#666;">({ph_confidence})</small><br>
             <b>{ph_headline}</b><br>
             {ph_explanation}
         </div>
